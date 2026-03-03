@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { SlideShape } from "@/components/editor/slide-shape";
+import { useSlideEditorStore } from "@/features/slide-editor/store";
 import { parseSlideXml } from "@/lib/slide-xml/parser";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -14,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { slides as mockSlides } from "@/mock/slides";
 import { Plus } from "lucide-react";
+import { useMemo, useSyncExternalStore } from "react";
 
 interface SidebarProps {
   slides: number[];
@@ -101,8 +103,30 @@ function ExpandedSlideThumbnail({
   isActive: boolean;
   onSelect?: (slideNumber: number) => void;
 }) {
+  const isHydrated = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+  const currentSlideIndex = useSlideEditorStore((state) => state.currentSlideIndex);
+  const storedShapes = useSlideEditorStore((state) => state.shapes);
   const slideXml = mockSlides[slideIndex];
-  const model = slideXml ? parseSlideXml(slideXml) : null;
+
+  const parsedShapes = useMemo(() => {
+    if (!slideXml) {
+      return [];
+    }
+
+    return parseSlideXml(slideXml).shapes;
+  }, [slideXml]);
+
+  const previewShapes = useMemo(() => {
+    if (isHydrated && isActive && currentSlideIndex === slideIndex) {
+      return [...storedShapes].sort((a, b) => a.zIndex - b.zIndex);
+    }
+
+    return parsedShapes;
+  }, [currentSlideIndex, isActive, isHydrated, parsedShapes, slideIndex, storedShapes]);
 
   return (
     <div className="flex items-start gap-2 group-data-[collapsible=icon]:hidden">
@@ -128,8 +152,11 @@ function ExpandedSlideThumbnail({
         <div className="flex h-full items-center justify-center overflow-hidden rounded-md border border-slate-100/50 bg-slate-50 p-1">
           <div className="h-full max-w-full [container-type:inline-size] aspect-[16/9]">
             <div className="relative h-full w-full overflow-hidden rounded-[4px] bg-white [--slide-unit:calc((100cqw/960)*0.7)]">
-              {model?.shapes.map((shape) => (
-                <SlideShape key={shape.attributes.id} shape={shape} />
+              {previewShapes.map((shape) => (
+                <SlideShape
+                  key={("id" in shape ? shape.id : shape.attributes.id) as string}
+                  shape={shape}
+                />
               ))}
             </div>
           </div>

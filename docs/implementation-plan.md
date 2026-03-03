@@ -28,12 +28,12 @@
 - [x] 全局加载字体：Montserrat、Open Sans
 
 ### Phase 3: 交互增强（Interaction）
-- [ ] 实现拖拽（Drag）并同步位移到 Store
-- [ ] 实现缩放（Resize）并同步尺寸到 Store
-- [ ] 实现文本内联编辑（Inline Editing）
-- [ ] 点击文本进入 `contenteditable` 模式
-- [ ] 失焦时同步 HTML 内容到 JSON 状态
-- [ ] 实现 Z-Index 管理（置顶/置底）
+- [x] 实现拖拽（Drag）并同步位移到 Store
+- [x] 实现缩放（Resize）并同步尺寸到 Store
+- [x] 实现文本内联编辑（Inline Editing）
+- [x] 点击文本进入 `contenteditable` 模式
+- [x] 失焦时同步 HTML 内容到 JSON 状态
+- [x] 实现 Z-Index 管理（置顶/置底）
 
 ### Phase 4: 同步与导出（Sync & Export）
 - [ ] 实现 Save 接口：调用 Serializer 并通过 API 提交 XML
