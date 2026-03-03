@@ -1,30 +1,61 @@
 "use client";
 
-import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
-import { useEffect, useMemo, useRef } from "react";
-import {
-  AlignLeft,
-  Bold,
-  ChevronDown,
-  Link2,
-  List,
-  Minus,
-  Pilcrow,
-  Plus,
-  Sparkles,
-  Type,
-  WandSparkles,
-} from "lucide-react";
+import type { PointerEvent as ReactPointerEvent, RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useSlideEditorStore } from "@/features/slide-editor/store";
 import type { EditableSlideShape } from "@/features/slide-editor/store";
 import { buildShapeContentHtml } from "@/lib/slide-xml/rich-text";
-import type { SlideShapeModel, XmlNode } from "@/lib/slide-xml/types";
+import type { SlideShapeModel, XmlNode, XmlValue } from "@/lib/slide-xml/types";
 
 const RESIZE_HANDLE_SIZE = 10;
 
+const FONT_OPTIONS = ["Montserrat", "Open Sans", "Noto Sans SC"] as const;
+const COLOR_OPTIONS = [
+  "rgba(17, 50, 100, 1)",
+  "rgba(13, 116, 206, 1)",
+  "rgba(239, 95, 0, 1)",
+  "rgba(31, 35, 41, 1)",
+  "rgba(100, 100, 100, 1)",
+] as const;
+
+type TextStyleState = {
+  fontFamily: string;
+  fontSize: number;
+  color: string;
+};
+
+type SlideShapeProps = {
+  shape: EditableSlideShape | SlideShapeModel;
+  viewportRef?: RefObject<HTMLDivElement | null>;
+  interactive?: boolean;
+};
+
 function toPercent(value: number, total: number): string {
   return `${(value / total) * 100}%`;
+}
+
+function toArray<T>(value: T | T[] | undefined): T[] {
+  if (!value) {
+    return [];
+  }
+
+  return Array.isArray(value) ? value : [value];
+}
+
+function appendXmlChild(node: XmlNode, key: string, value: XmlValue): void {
+  const current = node[key];
+  if (current === undefined) {
+    node[key] = value;
+    return;
+  }
+
+  if (Array.isArray(current)) {
+    node[key] = [...current, value];
+    return;
+  }
+
+  node[key] = [current, value];
 }
 
 function getFillColor(shapeNode: XmlNode): string | undefined {
@@ -55,11 +86,289 @@ function getBorderColor(shapeNode: XmlNode): string | undefined {
   return typeof color === "string" ? color : undefined;
 }
 
-type SlideShapeProps = {
-  shape: EditableSlideShape | SlideShapeModel;
-  viewportRef?: RefObject<HTMLDivElement | null>;
-  interactive?: boolean;
-};
+function normalizeColor(value: string): string {
+  const rgbMatch = value.match(/rgb\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)/i);
+  if (rgbMatch) {
+    return `rgba(${rgbMatch[1]}, ${rgbMatch[2]}, ${rgbMatch[3]}, 1)`;
+  }
+
+  const rgbaMatch = value.match(/rgba\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\)/i);
+  if (rgbaMatch) {
+    return `rgba(${rgbaMatch[1]}, ${rgbaMatch[2]}, ${rgbaMatch[3]}, ${rgbaMatch[4]})`;
+  }
+
+  return value;
+}
+
+function parseFontSize(styleValue: string): number | null {
+  const calcMatch = styleValue.match(/calc\(var\(--slide-unit\)\s*\*\s*([\d.]+)\)/);
+  if (calcMatch) {
+    return Number(calcMatch[1]);
+  }
+
+  const pxMatch = styleValue.match(/([\d.]+)px/);
+  if (pxMatch) {
+    return Number(pxMatch[1]);
+  }
+
+  const numeric = Number(styleValue);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function extractFontFamily(value: string): string {
+  const primary = value.split(",")[0]?.trim().replace(/^['\"]|['\"]$/g, "");
+  if (!primary) {
+    return FONT_OPTIONS[0];
+  }
+
+  if (FONT_OPTIONS.includes(primary as (typeof FONT_OPTIONS)[number])) {
+    return primary;
+  }
+
+  return primary;
+}
+
+function readSelectionTextStyle(editableElement: HTMLDivElement): TextStyleState {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return {
+      fontFamily: FONT_OPTIONS[0],
+      fontSize: 16,
+      color: "rgba(31, 35, 41, 1)",
+    };
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!editableElement.contains(range.commonAncestorContainer)) {
+    return {
+      fontFamily: FONT_OPTIONS[0],
+      fontSize: 16,
+      color: "rgba(31, 35, 41, 1)",
+    };
+  }
+
+  const element =
+    range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement ?? editableElement;
+
+  const computed = window.getComputedStyle(element as Element);
+  const parsedFontSize = Number.isFinite(Number(computed.fontSize.replace("px", "")))
+    ? Number(computed.fontSize.replace("px", ""))
+    : 16;
+
+  return {
+    fontFamily: extractFontFamily(computed.fontFamily),
+    fontSize: Math.max(8, Math.round(parsedFontSize)),
+    color: normalizeColor(computed.color),
+  };
+}
+
+function applyStyleToSelection(
+  editableElement: HTMLDivElement,
+  apply: (style: CSSStyleDeclaration) => void,
+): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!editableElement.contains(range.commonAncestorContainer) || range.collapsed) {
+    return false;
+  }
+
+  const span = document.createElement("span");
+  apply(span.style);
+
+  const fragment = range.extractContents();
+  if (!fragment.hasChildNodes()) {
+    return false;
+  }
+
+  span.appendChild(fragment);
+  range.insertNode(span);
+
+  selection.removeAllRanges();
+  const nextRange = document.createRange();
+  nextRange.selectNodeContents(span);
+  selection.addRange(nextRange);
+
+  return true;
+}
+
+function isCollapsedSelectionInside(editableElement: HTMLDivElement): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  return editableElement.contains(range.commonAncestorContainer) && range.collapsed;
+}
+
+function insertStyledTextAtCaret(
+  editableElement: HTMLDivElement,
+  text: string,
+  styleState: TextStyleState,
+): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!editableElement.contains(range.commonAncestorContainer) || !range.collapsed) {
+    return false;
+  }
+
+  const span = document.createElement("span");
+  span.style.fontFamily = styleState.fontFamily;
+  span.style.fontSize = `calc(var(--slide-unit) * ${styleState.fontSize})`;
+  span.style.color = styleState.color;
+  span.textContent = text;
+
+  range.insertNode(span);
+  range.setStartAfter(span);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+
+  return true;
+}
+
+function copyContentAttributes(contentNode: XmlValue | undefined): XmlNode {
+  if (!contentNode || typeof contentNode !== "object" || Array.isArray(contentNode)) {
+    return {};
+  }
+
+  const node = contentNode as XmlNode;
+  const copied: XmlNode = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key.startsWith("@_")) {
+      copied[key] = value;
+    }
+  }
+
+  return copied;
+}
+
+function applyStyleAttributes(target: XmlNode, element: HTMLElement): void {
+  if (element.style.color) {
+    target["@_color"] = normalizeColor(element.style.color);
+  }
+
+  if (element.style.fontFamily) {
+    target["@_fontFamily"] = extractFontFamily(element.style.fontFamily);
+  }
+
+  if (element.style.fontSize) {
+    const parsed = parseFontSize(element.style.fontSize);
+    if (parsed !== null) {
+      target["@_fontSize"] = parsed;
+    }
+  }
+
+  if (element.style.textAlign) {
+    target["@_textAlign"] = element.style.textAlign;
+  }
+}
+
+function elementToXmlNode(element: HTMLElement): XmlNode {
+  const node: XmlNode = {};
+  applyStyleAttributes(node, element);
+
+  for (const child of Array.from(element.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      const text = child.textContent ?? "";
+      if (text.length > 0) {
+        const currentText = node["#text"];
+        node["#text"] = `${typeof currentText === "string" ? currentText : ""}${text}`;
+      }
+      continue;
+    }
+
+    if (child.nodeType !== Node.ELEMENT_NODE) {
+      continue;
+    }
+
+    const childElement = child as HTMLElement;
+    const tagName = childElement.tagName.toLowerCase();
+
+    if (tagName === "br") {
+      const currentText = node["#text"];
+      node["#text"] = `${typeof currentText === "string" ? currentText : ""}\n`;
+      continue;
+    }
+
+    if (!["p", "span", "strong", "em", "u", "ul", "ol", "li"].includes(tagName)) {
+      const flattened = elementToXmlNode(childElement);
+      for (const [nestedKey, nestedValue] of Object.entries(flattened)) {
+        appendXmlChild(node, nestedKey, nestedValue as XmlValue);
+      }
+      continue;
+    }
+
+    appendXmlChild(node, tagName, elementToXmlNode(childElement));
+  }
+
+  return node;
+}
+
+function contentHtmlToXmlNode(html: string, previousContent: XmlValue | undefined): XmlNode {
+  const parser = new DOMParser();
+  const documentNode = parser.parseFromString(`<div>${html}</div>`, "text/html");
+  const wrapper = documentNode.body.firstElementChild as HTMLElement | null;
+
+  const contentNode = copyContentAttributes(previousContent);
+  if (!wrapper) {
+    return contentNode;
+  }
+
+  const root =
+    wrapper.childElementCount === 1 && wrapper.firstElementChild?.tagName.toLowerCase() === "div"
+      ? (wrapper.firstElementChild as HTMLElement)
+      : wrapper;
+
+  applyStyleAttributes(contentNode, root);
+
+  for (const child of Array.from(root.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      const text = child.textContent?.trim();
+      if (!text) {
+        continue;
+      }
+
+      appendXmlChild(contentNode, "p", { "#text": text });
+      continue;
+    }
+
+    if (child.nodeType !== Node.ELEMENT_NODE) {
+      continue;
+    }
+
+    const childElement = child as HTMLElement;
+    const tagName = childElement.tagName.toLowerCase();
+
+    if (["p", "ul", "ol"].includes(tagName)) {
+      appendXmlChild(contentNode, tagName, elementToXmlNode(childElement));
+      continue;
+    }
+
+    const paragraphNode: XmlNode = {};
+    appendXmlChild(paragraphNode, tagName, elementToXmlNode(childElement));
+    appendXmlChild(contentNode, "p", paragraphNode);
+  }
+
+  if (toArray(contentNode.p as XmlValue | XmlValue[] | undefined).length === 0) {
+    const fallbackText = root.textContent?.trim();
+    if (fallbackText) {
+      contentNode.p = { "#text": fallbackText };
+    }
+  }
+
+  return contentNode;
+}
 
 export function SlideShape({ shape, viewportRef, interactive = false }: SlideShapeProps) {
   const selectedShapeId = useSlideEditorStore((state) => state.selectedShapeId);
@@ -68,7 +377,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const setEditingShape = useSlideEditorStore((state) => state.setEditingShape);
   const updateShapePosition = useSlideEditorStore((state) => state.updateShapePosition);
   const updateShapeSize = useSlideEditorStore((state) => state.updateShapeSize);
-  const updateShapeContentHtml = useSlideEditorStore((state) => state.updateShapeContentHtml);
+  const updateShapeContent = useSlideEditorStore((state) => state.updateShapeContent);
 
   const editableRef = useRef<HTMLDivElement | null>(null);
 
@@ -87,6 +396,27 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const hasContent = contentHtml.length > 0;
   const isSelected = isInteractive && selectedShapeId === shapeId;
   const isEditing = isInteractive && editingShapeId === shapeId;
+  const [textStyle, setTextStyle] = useState<TextStyleState>({
+    fontFamily: FONT_OPTIONS[0],
+    fontSize: 16,
+    color: "rgba(31, 35, 41, 1)",
+  });
+  const draftTextStyleRef = useRef<TextStyleState | null>(null);
+
+  const syncShapeContentFromDom = useCallback(() => {
+    if (!isInteractive) {
+      return;
+    }
+
+    const element = editableRef.current;
+    if (!element) {
+      return;
+    }
+
+    const html = element.innerHTML;
+    const contentNode = contentHtmlToXmlNode(html, shape.rawNode.content);
+    updateShapeContent(shapeId, html, contentNode);
+  }, [isInteractive, shape.rawNode.content, shapeId, updateShapeContent]);
 
   useEffect(() => {
     const element = editableRef.current;
@@ -102,6 +432,68 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       element.innerHTML = contentHtml;
     }
   }, [contentHtml, isEditing]);
+
+  useEffect(() => {
+    if (!isInteractive || !isEditing) {
+      return;
+    }
+
+    const onSelectionChange = () => {
+      const element = editableRef.current;
+      if (!element) {
+        return;
+      }
+
+      setTextStyle(readSelectionTextStyle(element));
+    };
+
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => {
+      document.removeEventListener("selectionchange", onSelectionChange);
+    };
+  }, [isEditing, isInteractive]);
+
+  const applyTextStyle = useCallback(
+    (apply: (style: CSSStyleDeclaration) => void) => {
+      const element = editableRef.current;
+      if (!element) {
+        return;
+      }
+
+      if (applyStyleToSelection(element, apply)) {
+        setTextStyle(readSelectionTextStyle(element));
+        draftTextStyleRef.current = null;
+        syncShapeContentFromDom();
+        return;
+      }
+
+      if (!isCollapsedSelectionInside(element)) {
+        return;
+      }
+
+      const draft = {
+        fontFamily: textStyle.fontFamily,
+        fontSize: textStyle.fontSize,
+        color: textStyle.color,
+      };
+
+      const styleTarget = document.createElement("span").style;
+      styleTarget.fontFamily = draft.fontFamily;
+      styleTarget.fontSize = `calc(var(--slide-unit) * ${draft.fontSize})`;
+      styleTarget.color = draft.color;
+      apply(styleTarget);
+
+      const nextDraft: TextStyleState = {
+        fontFamily: styleTarget.fontFamily ? extractFontFamily(styleTarget.fontFamily) : draft.fontFamily,
+        fontSize: styleTarget.fontSize ? parseFontSize(styleTarget.fontSize) ?? draft.fontSize : draft.fontSize,
+        color: styleTarget.color ? normalizeColor(styleTarget.color) : draft.color,
+      };
+
+      draftTextStyleRef.current = nextDraft;
+      setTextStyle(nextDraft);
+    },
+    [syncShapeContentFromDom, textStyle.color, textStyle.fontFamily, textStyle.fontSize],
+  );
 
   const beginDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (isEditing) {
@@ -213,22 +605,69 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
                 setEditingShape(shapeId);
               }
             }}
+            onInput={() => {
+              if (!isInteractive) {
+                return;
+              }
+              syncShapeContentFromDom();
+            }}
+            onBeforeInput={(event) => {
+              if (!isInteractive || !isEditing) {
+                return;
+              }
+
+              const draftStyle = draftTextStyleRef.current;
+              if (!draftStyle) {
+                return;
+              }
+
+              if (event.inputType !== "insertText" || !event.data) {
+                return;
+              }
+
+              const element = editableRef.current;
+              if (!element) {
+                return;
+              }
+
+              if (!insertStyledTextAtCaret(element, event.data, draftStyle)) {
+                return;
+              }
+
+              event.preventDefault();
+              syncShapeContentFromDom();
+            }}
             onBlur={() => {
               if (!isInteractive) {
                 return;
               }
-              const content = editableRef.current?.innerHTML ?? "";
-              updateShapeContentHtml(shapeId, content);
+              syncShapeContentFromDom();
+              draftTextStyleRef.current = null;
               setEditingShape(null);
             }}
           />
         ) : null}
       </div>
 
-      {isSelected ? (
-        hasContent ? (
-          <TextFormatToolbar />
-        ) : null
+      {isSelected && hasContent ? (
+        <TextFormatToolbar
+          textStyle={textStyle}
+          onApplyFont={(fontFamily) => {
+            applyTextStyle((style) => {
+              style.fontFamily = fontFamily;
+            });
+          }}
+          onApplyFontSize={(fontSize) => {
+            applyTextStyle((style) => {
+              style.fontSize = `calc(var(--slide-unit) * ${fontSize})`;
+            });
+          }}
+          onApplyColor={(color) => {
+            applyTextStyle((style) => {
+              style.color = color;
+            });
+          }}
+        />
       ) : null}
 
       {isSelected ? (
@@ -248,77 +687,79 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   );
 }
 
-function TextFormatToolbar() {
+type TextFormatToolbarProps = {
+  textStyle: TextStyleState;
+  onApplyFont: (fontFamily: string) => void;
+  onApplyFontSize: (fontSize: number) => void;
+  onApplyColor: (color: string) => void;
+};
+
+function TextFormatToolbar({
+  textStyle,
+  onApplyFont,
+  onApplyFontSize,
+  onApplyColor,
+}: TextFormatToolbarProps) {
   return (
     <div
       className="absolute bottom-full left-1/2 z-40 mb-3 -translate-x-1/2"
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="flex min-w-max items-center rounded-2xl border border-slate-300 bg-white px-2 py-1.5 shadow-[0_4px_18px_rgba(15,23,42,0.12)]">
-        <ToolbarItem icon={<Sparkles className="h-4 w-4" />} label="Ask AI" highlighted />
-        <Divider />
-        <ToolbarItem label="正文" icon={<ChevronDown className="h-4 w-4" />} />
-        <Divider />
-        <ToolbarItem label="Montserrat" icon={<ChevronDown className="h-4 w-4" />} />
-        <StepperControl />
-        <ToolbarItem icon={<AlignLeft className="h-4 w-4" />} />
-        <ToolbarItem icon={<List className="h-4 w-4" />} />
-        <ToolbarItem icon={<Bold className="h-4 w-4" />} />
-        <ToolbarItem icon={<Link2 className="h-4 w-4" />} />
-        <ToolbarItem icon={<Type className="h-4 w-4" />} label="字体" />
-        <Divider />
-        <ToolbarItem icon={<Pilcrow className="h-4 w-4" />} label="段落" />
-        <ToolbarItem icon={<WandSparkles className="h-4 w-4" />} />
+      <div className="flex min-w-max items-center gap-2 rounded-2xl border border-slate-300 bg-white px-2 py-1.5 shadow-[0_4px_18px_rgba(15,23,42,0.12)]">
+        <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-1">
+          {FONT_OPTIONS.map((font) => (
+            <button
+              key={font}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onApplyFont(font)}
+              className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                textStyle.fontFamily === font
+                  ? "bg-sky-50 text-sky-700"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              {font}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex h-8 items-center rounded-xl border border-slate-300">
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onApplyFontSize(Math.max(8, textStyle.fontSize - 1))}
+            className="grid h-8 w-8 place-items-center rounded-l-xl text-slate-700 hover:bg-slate-100"
+          >
+            -
+          </button>
+          <span className="w-10 text-center text-sm font-medium text-slate-800">{textStyle.fontSize}</span>
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onApplyFontSize(Math.min(96, textStyle.fontSize + 1))}
+            className="grid h-8 w-8 place-items-center rounded-r-xl text-slate-700 hover:bg-slate-100"
+          >
+            +
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-1">
+          {COLOR_OPTIONS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onApplyColor(color)}
+              className="h-6 w-6 rounded-full border border-slate-200"
+              style={{
+                backgroundColor: color,
+                boxShadow: textStyle.color === color ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
+              }}
+            />
+          ))}
+        </div>
       </div>
-    </div>
-  );
-}
-
-function Divider() {
-  return <div className="mx-2 h-8 w-px bg-slate-200" />;
-}
-
-function IconButton({ icon, active = false }: { icon: ReactNode; active?: boolean }) {
-  return (
-    <button
-      type="button"
-      className={`grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-700 transition-colors duration-200 hover:bg-slate-100 ${
-        active ? "bg-blue-50 text-blue-600" : ""
-      }`}
-    >
-      {icon}
-    </button>
-  );
-}
-
-function ToolbarItem({
-  icon,
-  label,
-  highlighted = false,
-}: {
-  icon?: ReactNode;
-  label?: string;
-  highlighted?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      className={`flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-colors duration-200 hover:bg-slate-100 ${
-        highlighted ? "text-slate-900" : "text-slate-700"
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function StepperControl() {
-  return (
-    <div className="flex h-8 items-center rounded-xl border border-slate-300">
-      <IconButton icon={<Minus className="h-4 w-4" />} />
-      <span className="w-10 text-center text-sm font-medium text-slate-800">36</span>
-      <IconButton icon={<Plus className="h-4 w-4" />} />
     </div>
   );
 }

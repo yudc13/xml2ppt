@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import { buildShapeContentHtml } from "@/lib/slide-xml/rich-text";
-import type { ShapeAttributes, ShapeStyle, SlideDocumentModel, XmlNode } from "@/lib/slide-xml/types";
+import type { ShapeAttributes, ShapeStyle, SlideDocumentModel, XmlNode, XmlValue } from "@/lib/slide-xml/types";
 
 const SLIDE_WIDTH = 960;
 const SLIDE_HEIGHT = 540;
@@ -26,7 +26,7 @@ type SlideEditorState = {
   setEditingShape: (shapeId: string | null) => void;
   updateShapePosition: (shapeId: string, topLeftX: number, topLeftY: number) => void;
   updateShapeSize: (shapeId: string, width: number, height: number) => void;
-  updateShapeContentHtml: (shapeId: string, contentHtml: string) => void;
+  updateShapeContent: (shapeId: string, contentHtml: string, contentNode?: XmlValue) => void;
   bringToFront: () => void;
   sendToBack: () => void;
 };
@@ -132,11 +132,15 @@ export const useSlideEditorStore = create<SlideEditorState>((set) => ({
       }),
     }));
   },
-  updateShapeContentHtml: (shapeId, contentHtml) => {
+  updateShapeContent: (shapeId, contentHtml, contentNode) => {
     set((state) => ({
       shapes: updateShape(state.shapes, shapeId, (shape) => ({
         ...shape,
         contentHtml,
+        rawNode: {
+          ...shape.rawNode,
+          content: contentNode ?? shape.rawNode.content,
+        },
       })),
     }));
   },
