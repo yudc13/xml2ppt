@@ -25,6 +25,7 @@ export function SlideViewport({ slideIndex = DEFAULT_SLIDE_INDEX }: { slideIndex
 
   const initializeSlide = useSlideEditorStore((state) => state.initializeSlide);
   const selectShape = useSlideEditorStore((state) => state.selectShape);
+  const setEditingShape = useSlideEditorStore((state) => state.setEditingShape);
   const currentSlideIndex = useSlideEditorStore((state) => state.currentSlideIndex);
   const storedShapes = useSlideEditorStore((state) => state.shapes);
   const interactiveShapes = useMemo(
@@ -37,13 +38,34 @@ export function SlideViewport({ slideIndex = DEFAULT_SLIDE_INDEX }: { slideIndex
     initializeSlide(slideIndex, model);
   }, [initializeSlide, model, slideIndex]);
 
+  useEffect(() => {
+    const onWindowPointerDown = (event: PointerEvent) => {
+      const viewportElement = viewportRef.current;
+      const targetNode = event.target as Node | null;
+
+      if (!viewportElement || !targetNode) {
+        return;
+      }
+
+      if (!viewportElement.contains(targetNode)) {
+        selectShape(null);
+        setEditingShape(null);
+      }
+    };
+
+    window.addEventListener("pointerdown", onWindowPointerDown, { capture: true });
+    return () => {
+      window.removeEventListener("pointerdown", onWindowPointerDown, { capture: true });
+    };
+  }, [selectShape, setEditingShape]);
+
   return (
     <div className="w-full max-w-[1200px] animate-in fade-in zoom-in duration-500">
       <div className="rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-100 to-slate-200 p-6 shadow-sm md:p-8">
         <div className="mx-auto w-full max-w-[960px] [container-type:inline-size]">
           <div
             ref={viewportRef}
-            className="relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-white shadow-[0_8px_30px_rgba(15,23,42,0.08)] [--slide-unit:calc(100cqw/960)]"
+            className="relative aspect-[16/9] w-full overflow-visible rounded-xl bg-white shadow-[0_8px_30px_rgba(15,23,42,0.08)] [--slide-unit:calc(100cqw/960)]"
             onPointerDown={(event) => {
               if (event.target === event.currentTarget) {
                 selectShape(null);
