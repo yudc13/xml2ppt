@@ -1,6 +1,11 @@
-import { Button } from "@/components/ui/button";
-
-const TOOLBAR_ITEMS = ["Ask AI", "文本", "图形", "图片", "表格", "格式"];
+import {
+  ChevronDown,
+  Download,
+  Expand,
+  Play,
+  RefreshCw,
+  X,
+} from "lucide-react";
 
 export function Header() {
   return (
@@ -14,40 +19,56 @@ export function Header() {
         </p>
       </div>
 
-      <div className="hidden flex-1 justify-center lg:flex">
-        <Toolbar />
-      </div>
+      <div className="flex-1" />
 
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" className="rounded-xl px-4 text-slate-700">
+      <div className="flex items-center gap-1.5 text-slate-600">
+        <button
+          type="button"
+          className="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white/90 px-3 text-xs font-medium text-slate-700 shadow-[0_1px_4px_rgba(15,23,42,0.04)] transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+        >
           最新版本
-        </Button>
-        <Button variant="outline" size="sm" className="rounded-xl px-4 text-slate-700">
-          分享
-        </Button>
+          <ChevronDown className="h-3.5 w-3.5" />
+        </button>
+
+        <button
+          type="button"
+          className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100/80 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+          aria-label="历史记录"
+        >
+          <RefreshCw className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100/80 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+          aria-label="播放"
+        >
+          <Play className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100/80 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+          aria-label="下载"
+        >
+          <Download className="h-4 w-4" />
+        </button>
+
+        <div className="mx-1 h-5 w-px bg-slate-200" />
+
+        <button
+          type="button"
+          className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100/80 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+          aria-label="全屏"
+        >
+          <Expand className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100/80 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+          aria-label="关闭"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
     </header>
-  );
-}
-
-function Toolbar() {
-  return (
-    <div className="flex items-center divide-x divide-slate-200 rounded-2xl border border-slate-200 bg-white px-2 py-2 shadow-[0_2px_10px_rgba(15,23,42,0.04)]">
-      {TOOLBAR_ITEMS.map((item) => (
-        <button
-          key={item}
-          className="cursor-pointer px-4 py-2 text-sm font-medium text-slate-700 transition-colors duration-200 hover:text-[#0d9488]"
-          type="button"
-        >
-          {item}
-        </button>
-      ))}
-      <button
-        className="cursor-pointer px-4 py-2 text-sm font-medium text-slate-700 transition-colors duration-200 hover:text-[#0d9488]"
-        type="button"
-      >
-        98%
-      </button>
-    </div>
   );
 }
