@@ -9,28 +9,7 @@ import { slides as mockSlides } from "@/mock/slides";
 
 const INITIAL_ACTIVE_SLIDE_INDEX = 0;
 
-function decodeXmlEntities(input: string): string {
-  return input
-    .replace(/&#(\d+);/g, (_, digits: string) => String.fromCharCode(Number(digits)))
-    .replace(/&apos;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&");
-}
-
-function extractSlideTitle(slideXml: string): string {
-  const spanMatch = slideXml.match(/<shape[^>]*type="text"[^>]*>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/i);
-  if (!spanMatch) {
-    return "Untitled Slide";
-  }
-
-  const text = decodeXmlEntities(spanMatch[1]).replace(/<[^>]+>/g, "").trim();
-  return text.length > 0 ? text : "Untitled Slide";
-}
-
 const SLIDE_NUMBERS = mockSlides.map((_, index) => index + 1);
-const SLIDE_TITLES = mockSlides.map((slideXml) => extractSlideTitle(slideXml));
 
 export default function Home() {
   const [activeSlideIndex, setActiveSlideIndex] = useState(INITIAL_ACTIVE_SLIDE_INDEX);
@@ -42,7 +21,6 @@ export default function Home() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           slides={SLIDE_NUMBERS}
-          slideTitles={SLIDE_TITLES}
           activeSlide={activeSlideIndex + 1}
           onSlideSelect={(slideNumber) => setActiveSlideIndex(slideNumber - 1)}
         />

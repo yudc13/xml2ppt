@@ -19,7 +19,7 @@ describe("slide xml data transformation", () => {
     const model = parseSlideXml(slides[1]);
     const roundRect = model.shapes.find((shape) => shape.attributes.type === "round-rect");
 
-    expect(roundRect?.style.borderRadius).toBe("8px");
+    expect(roundRect?.style.borderRadius).toBe("calc(var(--slide-unit) * 8)");
   });
 
   test("keeps p/span nesting after serialization", () => {

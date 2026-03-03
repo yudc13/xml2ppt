@@ -118,7 +118,7 @@ function buildShapeAttributes(shape: XmlNode): ShapeAttributes {
 
 function buildShapeStyle(shape: XmlNode): ShapeStyle {
   if (shape["@_type"] === SHAPE_TYPE_ROUND_RECT) {
-    return { borderRadius: "8px" };
+    return { borderRadius: "calc(var(--slide-unit) * 8)" };
   }
 
   return {};

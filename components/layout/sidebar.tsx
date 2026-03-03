@@ -1,18 +1,19 @@
 import { Button } from "@/components/ui/button";
+import { SlideShape } from "@/components/editor/slide-shape";
+import { parseSlideXml } from "@/lib/slide-xml/parser";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { slides as mockSlides } from "@/mock/slides";
 
 interface SidebarProps {
   slides: number[];
   activeSlide?: number;
-  slideTitles?: string[];
   onSlideSelect?: (slideNumber: number) => void;
 }
 
 export function Sidebar({
   slides,
   activeSlide = 1,
-  slideTitles = [],
   onSlideSelect,
 }: SidebarProps) {
   return (
@@ -32,7 +33,7 @@ export function Sidebar({
             <SlideThumbnail
               key={slide}
               number={slide}
-              title={slideTitles[index]}
+              slideIndex={index}
               isActive={slide === activeSlide}
               onSelect={onSlideSelect}
             />
@@ -45,16 +46,17 @@ export function Sidebar({
 
 function SlideThumbnail({
   number,
-  title,
+  slideIndex,
   isActive,
   onSelect,
 }: {
   number: number;
-  title?: string;
+  slideIndex: number;
   isActive: boolean;
   onSelect?: (slideNumber: number) => void;
 }) {
-  const displayTitle = title && title.length > 0 ? title : "Untitled Slide";
+  const slideXml = mockSlides[slideIndex];
+  const model = slideXml ? parseSlideXml(slideXml) : null;
 
   return (
     <div className="flex items-start gap-2 group">
@@ -69,19 +71,21 @@ function SlideThumbnail({
         onClick={() => onSelect?.(number)}
         aria-pressed={isActive}
         className={cn(
-          "h-[90px] flex-1 cursor-pointer rounded-xl border p-2 text-left transition-all duration-200",
+          "h-[72px] flex-1 cursor-pointer rounded-xl border p-1.5 text-left transition-all duration-200",
           isActive
             ? "border-blue-500 bg-white ring-2 ring-blue-500/10 shadow-sm"
             : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"
         )}
       >
-        <p className={cn(
-          "line-clamp-2 text-[10px] font-semibold leading-tight",
-          isActive ? "text-blue-900" : "text-slate-600"
-        )}>
-          {displayTitle}
-        </p>
-        <div className="mt-2 h-12 rounded-md bg-gradient-to-br from-slate-50 to-slate-200 border border-slate-100/50" />
+        <div className="h-full overflow-hidden rounded-md border border-slate-100/50 bg-slate-50 p-0.5">
+          <div className="h-full [container-type:inline-size]">
+            <div className="relative h-full w-full overflow-hidden rounded-[4px] bg-white [--slide-unit:calc((100cqw/960)*0.58)]">
+              {model?.shapes.map((shape) => (
+                <SlideShape key={shape.attributes.id} shape={shape} />
+              ))}
+            </div>
+          </div>
+        </div>
       </button>
     </div>
   );
