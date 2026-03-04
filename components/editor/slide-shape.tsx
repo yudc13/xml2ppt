@@ -25,6 +25,11 @@ type TextStyleState = {
   color: string;
 };
 
+type ToolbarAnchor = {
+  left: number;
+  top: number;
+};
+
 type SlideShapeProps = {
   shape: EditableSlideShape | SlideShapeModel;
   viewportRef?: RefObject<HTMLDivElement | null>;
@@ -197,6 +202,16 @@ function applyStyleToSelection(
   return true;
 }
 
+function hasExpandedSelectionInside(editableElement: HTMLDivElement): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  return editableElement.contains(range.commonAncestorContainer) && !range.collapsed;
+}
+
 function isCollapsedSelectionInside(editableElement: HTMLDivElement): boolean {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0) {
@@ -205,6 +220,43 @@ function isCollapsedSelectionInside(editableElement: HTMLDivElement): boolean {
 
   const range = selection.getRangeAt(0);
   return editableElement.contains(range.commonAncestorContainer) && range.collapsed;
+}
+
+function restoreCollapsedSelection(
+  editableElement: HTMLDivElement,
+  savedRange: Range | null,
+): boolean {
+  if (!savedRange) {
+    return false;
+  }
+
+  const container = savedRange.commonAncestorContainer;
+  if (!editableElement.contains(container)) {
+    return false;
+  }
+
+  const nextRange = savedRange.cloneRange();
+  nextRange.collapse(true);
+  const selection = window.getSelection();
+  if (!selection) {
+    return false;
+  }
+
+  editableElement.focus();
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+  return true;
+}
+
+function applyStyleToEntireContent(
+  editableElement: HTMLDivElement,
+  apply: (style: CSSStyleDeclaration) => void,
+): void {
+  apply(editableElement.style);
+  const allDescendants = editableElement.querySelectorAll<HTMLElement>("*");
+  for (const element of allDescendants) {
+    apply(element.style);
+  }
 }
 
 function insertStyledTextAtCaret(
@@ -380,6 +432,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const updateShapeContent = useSlideEditorStore((state) => state.updateShapeContent);
 
   const editableRef = useRef<HTMLDivElement | null>(null);
+  const shapeRef = useRef<HTMLDivElement | null>(null);
 
   const backgroundColor = useMemo(() => getFillColor(shape.rawNode), [shape.rawNode]);
   const borderColor = useMemo(() => getBorderColor(shape.rawNode), [shape.rawNode]);
@@ -401,7 +454,9 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     fontSize: 16,
     color: "rgba(31, 35, 41, 1)",
   });
+  const [toolbarAnchor, setToolbarAnchor] = useState<ToolbarAnchor | null>(null);
   const draftTextStyleRef = useRef<TextStyleState | null>(null);
+  const savedCollapsedRangeRef = useRef<Range | null>(null);
 
   const syncShapeContentFromDom = useCallback(() => {
     if (!isInteractive) {
@@ -443,6 +498,31 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       if (!element) {
         return;
       }
+      const container = shapeRef.current;
+      if (!container) {
+        return;
+      }
+
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const isInside = element.contains(range.commonAncestorContainer);
+        if (isInside && range.collapsed) {
+          savedCollapsedRangeRef.current = range.cloneRange();
+          setToolbarAnchor(null);
+        } else if (isInside && !range.collapsed) {
+          const rect = range.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+          setToolbarAnchor({
+            left: rect.left + rect.width / 2 - containerRect.left,
+            top: rect.top - containerRect.top,
+          });
+        } else {
+          setToolbarAnchor(null);
+        }
+      } else {
+        setToolbarAnchor(null);
+      }
 
       setTextStyle(readSelectionTextStyle(element));
     };
@@ -460,14 +540,21 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         return;
       }
 
-      if (applyStyleToSelection(element, apply)) {
+      if (hasExpandedSelectionInside(element) && applyStyleToSelection(element, apply)) {
+        const selection = window.getSelection();
+        const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+        const container = shapeRef.current;
+        if (range && container && element.contains(range.commonAncestorContainer)) {
+          const rect = range.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+          setToolbarAnchor({
+            left: rect.left + rect.width / 2 - containerRect.left,
+            top: rect.top - containerRect.top,
+          });
+        }
         setTextStyle(readSelectionTextStyle(element));
         draftTextStyleRef.current = null;
         syncShapeContentFromDom();
-        return;
-      }
-
-      if (!isCollapsedSelectionInside(element)) {
         return;
       }
 
@@ -489,6 +576,13 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         color: styleTarget.color ? normalizeColor(styleTarget.color) : draft.color,
       };
 
+      if (!isCollapsedSelectionInside(element)) {
+        restoreCollapsedSelection(element, savedCollapsedRangeRef.current);
+      }
+
+      applyStyleToEntireContent(element, apply);
+      setToolbarAnchor(null);
+      syncShapeContentFromDom();
       draftTextStyleRef.current = nextDraft;
       setTextStyle(nextDraft);
     },
@@ -563,6 +657,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 
   return (
     <div
+      ref={shapeRef}
       className="absolute overflow-visible"
       style={{
         left: toPercent(shape.attributes.topLeftX, 960),
@@ -630,6 +725,10 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
                 return;
               }
 
+              if (!isCollapsedSelectionInside(element)) {
+                restoreCollapsedSelection(element, savedCollapsedRangeRef.current);
+              }
+
               if (!insertStyledTextAtCaret(element, event.data, draftStyle)) {
                 return;
               }
@@ -643,6 +742,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
               }
               syncShapeContentFromDom();
               draftTextStyleRef.current = null;
+              savedCollapsedRangeRef.current = null;
               setEditingShape(null);
             }}
           />
@@ -651,6 +751,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 
       {isSelected && hasContent ? (
         <TextFormatToolbar
+          anchor={toolbarAnchor}
           textStyle={textStyle}
           onApplyFont={(fontFamily) => {
             applyTextStyle((style) => {
@@ -688,6 +789,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 }
 
 type TextFormatToolbarProps = {
+  anchor: ToolbarAnchor | null;
   textStyle: TextStyleState;
   onApplyFont: (fontFamily: string) => void;
   onApplyFontSize: (fontSize: number) => void;
@@ -695,6 +797,7 @@ type TextFormatToolbarProps = {
 };
 
 function TextFormatToolbar({
+  anchor,
   textStyle,
   onApplyFont,
   onApplyFontSize,
@@ -702,7 +805,18 @@ function TextFormatToolbar({
 }: TextFormatToolbarProps) {
   return (
     <div
-      className="absolute bottom-full left-1/2 z-40 mb-3 -translate-x-1/2"
+      className="absolute z-40 -translate-x-1/2 -translate-y-full"
+      style={
+        anchor
+          ? {
+              left: anchor.left,
+              top: anchor.top - 8,
+            }
+          : {
+              left: "50%",
+              top: -12,
+            }
+      }
       onPointerDown={(event) => event.stopPropagation()}
     >
       <div className="flex min-w-max items-center gap-2 rounded-2xl border border-slate-300 bg-white px-2 py-1.5 shadow-[0_4px_18px_rgba(15,23,42,0.12)]">
