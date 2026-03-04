@@ -67,6 +67,13 @@ type PersistedSlide = {
   updatedAt: string;
 };
 
+type Deck = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type SlideRevision = {
   id: number;
   slideId: string;
@@ -116,6 +123,7 @@ export default function Home() {
   const setPreviewMode = useSlideEditorStore((state) => state.setPreviewMode);
 
   const [deckId, setDeckId] = useState<string | null>(null);
+  const [deckTitle, setDeckTitle] = useState("未命名演示文稿");
   const [slides, setSlides] = useState<PersistedSlide[]>([]);
   const [activeSlideIndex, setActiveSlideIndex] = useState(INITIAL_ACTIVE_SLIDE_INDEX);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
@@ -167,7 +175,7 @@ export default function Home() {
         let nextDeckId = storedDeckId;
 
         if (!nextDeckId) {
-          const created = await requestJson<{ ok: true; deck: { id: string } }>("/api/decks", {
+          const created = await requestJson<{ ok: true; deck: Deck }>("/api/decks", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -177,8 +185,12 @@ export default function Home() {
             }),
           });
           nextDeckId = created.deck.id;
+          setDeckTitle(created.deck.title);
           window.localStorage.setItem(DECK_ID_STORAGE_KEY, nextDeckId);
         }
+
+        const loadedDeck = await requestJson<{ ok: true; deck: Deck }>(`/api/decks/${nextDeckId}`);
+        setDeckTitle(loadedDeck.deck.title);
 
         const loadedSlidesResponse = await requestJson<{ ok: true; slides: PersistedSlide[] }>(
           `/api/decks/${nextDeckId}/slides`,
@@ -507,7 +519,30 @@ export default function Home() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#f2f4f7] font-sans text-slate-900">
-      <Header />
+      <Header
+        title={deckTitle}
+        onTitleSave={async (nextTitle) => {
+          if (!deckId) {
+            return false;
+          }
+
+          try {
+            const updated = await requestJson<{ ok: true; deck: Deck }>(`/api/decks/${deckId}`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                title: nextTitle,
+              }),
+            });
+            setDeckTitle(updated.deck.title);
+            return true;
+          } catch {
+            return false;
+          }
+        }}
+      />
 
       <div className="flex flex-1 overflow-hidden">
         <SidebarProvider defaultOpen>

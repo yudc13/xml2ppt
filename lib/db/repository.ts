@@ -17,6 +17,26 @@ export async function createDeck(title: string): Promise<Deck> {
   return created;
 }
 
+export async function getDeckById(deckId: string): Promise<Deck | null> {
+  const db = getDb();
+  const [deck] = await db.select().from(decks).where(eq(decks.id, deckId)).limit(1);
+  return deck ?? null;
+}
+
+export async function updateDeckTitle(deckId: string, title: string): Promise<Deck | null> {
+  const db = getDb();
+  const [updated] = await db
+    .update(decks)
+    .set({
+      title,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(decks.id, deckId))
+    .returning();
+
+  return updated ?? null;
+}
+
 export async function getSlidesByDeckId(deckId: string): Promise<Slide[]> {
   const db = getDb();
   return db.select().from(slides).where(eq(slides.deckId, deckId)).orderBy(asc(slides.position));
