@@ -14,6 +14,7 @@ const SHAPE_NUMERIC_ATTRIBUTE_KEYS = [
   "height",
   "topLeftX",
   "topLeftY",
+  "rotation",
   "presetHandlers",
 ] as const;
 
@@ -113,6 +114,7 @@ function buildShapeAttributes(shape: XmlNode): ShapeAttributes {
     height: toFiniteNumberOrZero(shape["@_height"]),
     topLeftX: toFiniteNumberOrZero(shape["@_topLeftX"]),
     topLeftY: toFiniteNumberOrZero(shape["@_topLeftY"]),
+    rotation: toFiniteNumberOrZero(shape["@_rotation"]),
   };
 }
 

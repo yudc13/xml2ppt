@@ -9,6 +9,8 @@ import { buildShapeContentHtml } from "@/lib/slide-xml/rich-text";
 import type { SlideShapeModel, TableModel, XmlNode, XmlValue } from "@/lib/slide-xml/types";
 
 const RESIZE_HANDLE_SIZE = 10;
+const ROTATION_SNAP_DEGREES = 15;
+const ROTATE_HANDLE_OFFSET = 28;
 
 const FONT_OPTIONS = ["Montserrat", "Open Sans", "Noto Sans SC"] as const;
 const COLOR_OPTIONS = [
@@ -30,6 +32,12 @@ type ToolbarAnchor = {
   top: number;
 };
 
+type RotationIndicator = {
+  angle: number;
+  left: number | string;
+  top: number | string;
+};
+
 type SlideShapeProps = {
   shape: EditableSlideShape | SlideShapeModel;
   viewportRef?: RefObject<HTMLDivElement | null>;
@@ -38,6 +46,14 @@ type SlideShapeProps = {
 
 function toPercent(value: number, total: number): string {
   return `${(value / total) * 100}%`;
+}
+
+function normalizeRotation(value: number): number {
+  return ((value % 360) + 360) % 360;
+}
+
+function toDegrees(radian: number): number {
+  return (radian * 180) / Math.PI;
 }
 
 function toArray<T>(value: T | T[] | undefined): T[] {
@@ -512,12 +528,14 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const setEditingShape = useSlideEditorStore((state) => state.setEditingShape);
   const updateShapePosition = useSlideEditorStore((state) => state.updateShapePosition);
   const updateShapeSize = useSlideEditorStore((state) => state.updateShapeSize);
+  const updateShapeRotation = useSlideEditorStore((state) => state.updateShapeRotation);
   const updateShapeContent = useSlideEditorStore((state) => state.updateShapeContent);
   const updateTableCell = useSlideEditorStore((state) => state.updateTableCell);
   const addTableRow = useSlideEditorStore((state) => state.addTableRow);
   const removeTableRow = useSlideEditorStore((state) => state.removeTableRow);
   const addTableColumn = useSlideEditorStore((state) => state.addTableColumn);
   const removeTableColumn = useSlideEditorStore((state) => state.removeTableColumn);
+  const captureHistorySnapshot = useSlideEditorStore((state) => state.captureHistorySnapshot);
 
   const editableRef = useRef<HTMLDivElement | null>(null);
   const shapeRef = useRef<HTMLDivElement | null>(null);
@@ -554,8 +572,10 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     color: "rgba(31, 35, 41, 1)",
   });
   const [toolbarAnchor, setToolbarAnchor] = useState<ToolbarAnchor | null>(null);
+  const [rotationIndicator, setRotationIndicator] = useState<RotationIndicator | null>(null);
   const draftTextStyleRef = useRef<TextStyleState | null>(null);
   const savedCollapsedRangeRef = useRef<Range | null>(null);
+  const currentRotation = shape.attributes.rotation ?? 0;
 
   const syncShapeContentFromDom = useCallback(() => {
     if (!isInteractive) {
@@ -693,6 +713,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 
     event.preventDefault();
     event.stopPropagation();
+    captureHistorySnapshot();
     selectShape(shapeId);
 
     const viewportElement = viewportRef?.current;
@@ -724,6 +745,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    captureHistorySnapshot();
     selectShape(shapeId);
 
     const viewportElement = viewportRef?.current;
@@ -752,6 +774,51 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     window.addEventListener("pointerup", onUp);
   };
 
+  const beginRotate = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    captureHistorySnapshot();
+    selectShape(shapeId);
+
+    const viewportElement = viewportRef?.current;
+    if (!viewportElement) {
+      return;
+    }
+
+    const rect = viewportElement.getBoundingClientRect();
+    const centerX = rect.left + ((shape.attributes.topLeftX + shape.attributes.width / 2) / 960) * rect.width;
+    const centerY = rect.top + ((shape.attributes.topLeftY + shape.attributes.height / 2) / 540) * rect.height;
+    const startPointerAngle = toDegrees(Math.atan2(event.clientY - centerY, event.clientX - centerX));
+    const startRotation = currentRotation;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const pointerAngle = toDegrees(Math.atan2(moveEvent.clientY - centerY, moveEvent.clientX - centerX));
+      const deltaAngle = pointerAngle - startPointerAngle;
+      let nextRotation = normalizeRotation(startRotation + deltaAngle);
+
+      if (!moveEvent.shiftKey) {
+        nextRotation = Math.round(nextRotation / ROTATION_SNAP_DEGREES) * ROTATION_SNAP_DEGREES;
+        nextRotation = normalizeRotation(nextRotation);
+      }
+
+      updateShapeRotation(shapeId, nextRotation);
+      setRotationIndicator({
+        angle: nextRotation,
+        left: "50%",
+        top: `calc(100% + ${ROTATE_HANDLE_OFFSET + 16}px)`,
+      });
+    };
+
+    const onUp = () => {
+      setRotationIndicator(null);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   return (
     <div
       ref={shapeRef}
@@ -768,6 +835,8 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       <div
         className="h-full w-full overflow-hidden"
         style={{
+          transform: `rotate(${currentRotation}deg)`,
+          transformOrigin: "center center",
           background: isLineLikeShape ? undefined : backgroundColor,
           borderRadius: isEllipseShape ? "9999px" : shape.style.borderRadius,
           border: !isLineLikeShape && borderColor ? `${borderWidth}px solid ${borderColor}` : undefined,
@@ -987,16 +1056,56 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 
       {isSelected ? (
         <div
-          className="absolute rounded-sm border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
+          className="pointer-events-none absolute inset-0 overflow-visible"
           style={{
-            right: -(RESIZE_HANDLE_SIZE / 2),
-            bottom: -(RESIZE_HANDLE_SIZE / 2),
-            width: RESIZE_HANDLE_SIZE,
-            height: RESIZE_HANDLE_SIZE,
-            cursor: "nwse-resize",
+            transform: `rotate(${currentRotation}deg)`,
+            transformOrigin: "center center",
           }}
-          onPointerDown={beginResize}
-        />
+        >
+          <div
+            className="pointer-events-none absolute w-px bg-sky-500/70"
+            style={{
+              left: "50%",
+              top: "100%",
+              height: ROTATE_HANDLE_OFFSET - 10,
+              transform: "translateX(-50%)",
+            }}
+          />
+          <div
+            className="pointer-events-auto absolute rounded-full border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
+            style={{
+              left: "50%",
+              top: `calc(100% + ${ROTATE_HANDLE_OFFSET}px)`,
+              width: RESIZE_HANDLE_SIZE,
+              height: RESIZE_HANDLE_SIZE,
+              transform: "translate(-50%, -50%)",
+              cursor: "grab",
+            }}
+            onPointerDown={beginRotate}
+          />
+          {rotationIndicator ? (
+            <div
+              className="pointer-events-none absolute z-40 -translate-x-1/2 rounded-md bg-slate-900/88 px-2 py-1 text-[10px] font-medium text-white"
+              style={{
+                left: rotationIndicator.left,
+                top: rotationIndicator.top,
+              }}
+            >
+              {Math.round(rotationIndicator.angle)}°
+            </div>
+          ) : null}
+          <div
+            className="pointer-events-auto absolute rounded-sm border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
+            style={{
+              right: -(RESIZE_HANDLE_SIZE / 2),
+              bottom: -(RESIZE_HANDLE_SIZE / 2),
+              width: RESIZE_HANDLE_SIZE,
+              height: RESIZE_HANDLE_SIZE,
+              cursor: "nwse-resize",
+            }}
+            onPointerDown={beginResize}
+          />
+        </div>
       ) : null}
     </div>
   );

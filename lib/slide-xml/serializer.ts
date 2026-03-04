@@ -8,6 +8,7 @@ const SHAPE_NUMERIC_ATTRIBUTE_KEYS = [
   "height",
   "topLeftX",
   "topLeftY",
+  "rotation",
   "presetHandlers",
 ] as const;
 
@@ -81,6 +82,7 @@ function shapeToXmlNode(shape: SlideShapeModel): XmlNode {
   shapeNode["@_height"] = stringifyNumber(shape.attributes.height);
   shapeNode["@_topLeftX"] = stringifyNumber(shape.attributes.topLeftX);
   shapeNode["@_topLeftY"] = stringifyNumber(shape.attributes.topLeftY);
+  shapeNode["@_rotation"] = stringifyNumber(shape.attributes.rotation);
 
   return normalizeRgbaInTree(shapeNode) as XmlNode;
 }

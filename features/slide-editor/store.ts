@@ -21,6 +21,7 @@ const DEFAULT_LINE_WIDTH = 280;
 const DEFAULT_LINE_HEIGHT = 4;
 const DEFAULT_TABLE_ROWS = 3;
 const DEFAULT_TABLE_COLUMNS = 3;
+const HISTORY_LIMIT = 100;
 
 type InsertShapeType = "rect" | "ellipse" | "line" | "arrow";
 
@@ -31,6 +32,12 @@ type EditableSlideShape = {
   rawNode: XmlNode;
   contentHtml: string;
   zIndex: number;
+};
+
+type HistorySnapshot = {
+  shapes: EditableSlideShape[];
+  selectedShapeId: string | null;
+  editingShapeId: string | null;
 };
 
 type SlideEditorState = {
@@ -47,6 +54,7 @@ type SlideEditorState = {
   setPreviewMode: (value: boolean) => void;
   updateShapePosition: (shapeId: string, topLeftX: number, topLeftY: number) => void;
   updateShapeSize: (shapeId: string, width: number, height: number) => void;
+  updateShapeRotation: (shapeId: string, rotation: number) => void;
   updateShapeContent: (shapeId: string, contentHtml: string, contentNode?: XmlValue) => void;
   updateTableCell: (shapeId: string, rowIndex: number, colIndex: number, text: string) => void;
   addTableRow: (shapeId: string) => void;
@@ -61,7 +69,12 @@ type SlideEditorState = {
   insertTable: (rows?: number, columns?: number) => void;
   bringToFront: () => void;
   sendToBack: () => void;
+  captureHistorySnapshot: () => void;
+  undo: () => void;
+  redo: () => void;
   buildSlideDocumentModel: () => SlideDocumentModel | null;
+  historyPast: HistorySnapshot[];
+  historyFuture: HistorySnapshot[];
 };
 
 function round2(value: number): number {
@@ -70,6 +83,11 @@ function round2(value: number): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function normalizeRotation(value: number): number {
+  const normalized = ((value % 360) + 360) % 360;
+  return round2(normalized);
 }
 
 function normalizeShapeAttributes(attributes: ShapeAttributes): ShapeAttributes {
@@ -82,6 +100,15 @@ function normalizeShapeAttributes(attributes: ShapeAttributes): ShapeAttributes 
     height,
     topLeftX: round2(clamp(attributes.topLeftX, 0, SLIDE_WIDTH - width)),
     topLeftY: round2(clamp(attributes.topLeftY, 0, SLIDE_HEIGHT - height)),
+    rotation: normalizeRotation(attributes.rotation),
+  };
+}
+
+function toHistorySnapshot(state: SlideEditorState): HistorySnapshot {
+  return {
+    shapes: structuredClone(state.shapes),
+    selectedShapeId: state.selectedShapeId,
+    editingShapeId: state.editingShapeId,
   };
 }
 
@@ -263,6 +290,7 @@ function createEditableShape(params: {
     type: params.type,
     width: params.width,
     height: params.height,
+    rotation: 0,
     ...toInsertPosition(params.width, params.height),
   });
   const mergedRawNode: XmlNode = {
@@ -273,6 +301,7 @@ function createEditableShape(params: {
     "@_height": normalized.height,
     "@_topLeftX": normalized.topLeftX,
     "@_topLeftY": normalized.topLeftY,
+    "@_rotation": normalized.rotation,
   };
 
   if (params.contentNode) {
@@ -303,6 +332,7 @@ function cloneShapeForDuplicate(source: EditableSlideShape, offset = 24): Editab
   rawNode["@_topLeftY"] = attributes.topLeftY;
   rawNode["@_width"] = attributes.width;
   rawNode["@_height"] = attributes.height;
+  rawNode["@_rotation"] = attributes.rotation;
 
   return {
     ...source,
@@ -321,6 +351,8 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
   clipboardShape: null,
   selectedShapeId: null,
   editingShapeId: null,
+  historyPast: [],
+  historyFuture: [],
   initializeSlide: (slideIndex, model) => {
     set((state) => {
       if (state.currentSlideIndex === slideIndex) {
@@ -335,14 +367,24 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
         },
         selectedShapeId: null,
         editingShapeId: null,
-        shapes: model.shapes.map((shape, index) => ({
-          id: shape.attributes.id,
-          attributes: normalizeShapeAttributes(shape.attributes),
-          style: shape.style,
-          rawNode: shape.rawNode,
-          contentHtml: shape.rawNode.content ? buildShapeContentHtml(shape.rawNode.content) : "",
-          zIndex: index,
-        })),
+        historyPast: [],
+        historyFuture: [],
+        shapes: model.shapes.map((shape, index) => {
+          const normalizedAttributes = normalizeShapeAttributes(shape.attributes);
+          const normalizedRawNode = {
+            ...shape.rawNode,
+            "@_rotation": normalizedAttributes.rotation,
+          };
+
+          return {
+            id: shape.attributes.id,
+            attributes: normalizedAttributes,
+            style: shape.style,
+            rawNode: normalizedRawNode,
+            contentHtml: shape.rawNode.content ? buildShapeContentHtml(shape.rawNode.content) : "",
+            zIndex: index,
+          };
+        }),
       };
     });
   },
@@ -391,6 +433,21 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
           },
         };
       }),
+    }));
+  },
+  updateShapeRotation: (shapeId, rotation) => {
+    set((state) => ({
+      shapes: updateShape(state.shapes, shapeId, (shape) => ({
+        ...shape,
+        attributes: {
+          ...shape.attributes,
+          rotation: normalizeRotation(rotation),
+        },
+        rawNode: {
+          ...shape.rawNode,
+          "@_rotation": normalizeRotation(rotation),
+        },
+      })),
     }));
   },
   updateShapeContent: (shapeId, contentHtml, contentNode) => {
@@ -726,6 +783,44 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
           ...shape,
           zIndex: currentMin - 1,
         })),
+      };
+    });
+  },
+  captureHistorySnapshot: () => {
+    set((state) => ({
+      historyPast: [...state.historyPast, toHistorySnapshot(state)].slice(-HISTORY_LIMIT),
+      historyFuture: [],
+    }));
+  },
+  undo: () => {
+    set((state) => {
+      if (state.historyPast.length === 0) {
+        return state;
+      }
+
+      const previousSnapshot = state.historyPast[state.historyPast.length - 1];
+      return {
+        shapes: previousSnapshot.shapes,
+        selectedShapeId: previousSnapshot.selectedShapeId,
+        editingShapeId: previousSnapshot.editingShapeId,
+        historyPast: state.historyPast.slice(0, -1),
+        historyFuture: [toHistorySnapshot(state), ...state.historyFuture].slice(0, HISTORY_LIMIT),
+      };
+    });
+  },
+  redo: () => {
+    set((state) => {
+      if (state.historyFuture.length === 0) {
+        return state;
+      }
+
+      const [nextSnapshot, ...restFuture] = state.historyFuture;
+      return {
+        shapes: nextSnapshot.shapes,
+        selectedShapeId: nextSnapshot.selectedShapeId,
+        editingShapeId: nextSnapshot.editingShapeId,
+        historyPast: [...state.historyPast, toHistorySnapshot(state)].slice(-HISTORY_LIMIT),
+        historyFuture: restFuture,
       };
     });
   },

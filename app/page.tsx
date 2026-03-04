@@ -94,6 +94,8 @@ function Toolbar({ slideIndex }: { slideIndex: number }) {
   const copySelectedShape = useSlideEditorStore((state) => state.copySelectedShape);
   const pasteCopiedShape = useSlideEditorStore((state) => state.pasteCopiedShape);
   const deleteSelectedShape = useSlideEditorStore((state) => state.deleteSelectedShape);
+  const undo = useSlideEditorStore((state) => state.undo);
+  const redo = useSlideEditorStore((state) => state.redo);
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
@@ -114,6 +116,18 @@ function Toolbar({ slideIndex }: { slideIndex: number }) {
       }
 
       const isMeta = event.metaKey || event.ctrlKey;
+      if (isMeta && !event.shiftKey && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        undo();
+        return;
+      }
+
+      if ((isMeta && event.shiftKey && event.key.toLowerCase() === "z") || (isMeta && event.key.toLowerCase() === "y")) {
+        event.preventDefault();
+        redo();
+        return;
+      }
+
       if (isMeta && event.key.toLowerCase() === "c") {
         event.preventDefault();
         copySelectedShape();
@@ -134,7 +148,7 @@ function Toolbar({ slideIndex }: { slideIndex: number }) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [copySelectedShape, deleteSelectedShape, isPreviewMode, pasteCopiedShape]);
+  }, [copySelectedShape, deleteSelectedShape, isPreviewMode, pasteCopiedShape, redo, undo]);
 
   const handleSave = async () => {
     const model = buildSlideDocumentModel();

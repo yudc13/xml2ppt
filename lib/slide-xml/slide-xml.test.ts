@@ -14,6 +14,7 @@ describe("slide xml data transformation", () => {
     expect(typeof shape.attributes.topLeftY).toBe("number");
     expect(typeof shape.attributes.width).toBe("number");
     expect(typeof shape.attributes.height).toBe("number");
+    expect(typeof shape.attributes.rotation).toBe("number");
   });
 
   test("maps round-rect to borderRadius style", () => {
@@ -47,6 +48,7 @@ describe("slide xml data transformation", () => {
             height: 180,
             topLeftX: 100,
             topLeftY: 60,
+            rotation: 0,
           },
           style: { borderRadius: "9999px" },
           rawNode: {
@@ -66,6 +68,7 @@ describe("slide xml data transformation", () => {
             height: 8,
             topLeftX: 220,
             topLeftY: 200,
+            rotation: 0,
           },
           style: {},
           rawNode: {
@@ -125,6 +128,7 @@ describe("slide xml data transformation", () => {
             height: 176,
             topLeftX: 120,
             topLeftY: 100,
+            rotation: 0,
           },
           style: {},
           rawNode: {

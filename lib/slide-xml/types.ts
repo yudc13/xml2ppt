@@ -34,6 +34,7 @@ export type ShapeAttributes = {
   height: number
   topLeftX: number
   topLeftY: number
+  rotation: number
 }
 
 export type TableCellModel = {
