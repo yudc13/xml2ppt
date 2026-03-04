@@ -1,16 +1,23 @@
 "use client";
 
-import type { PointerEvent as ReactPointerEvent, RefObject } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { useSlideEditorStore } from "@/features/slide-editor/store";
 import type { EditableSlideShape } from "@/features/slide-editor/store";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { buildShapeContentHtml } from "@/lib/slide-xml/rich-text";
 import type { SlideShapeModel, TableModel, XmlNode, XmlValue } from "@/lib/slide-xml/types";
 
 const RESIZE_HANDLE_SIZE = 10;
+const HANDLE_HIT_SIZE = 32;
 const ROTATION_SNAP_DEGREES = 15;
 const ROTATE_HANDLE_OFFSET = 28;
+const TOOLBAR_GAP = 12;
+const HANDLE_EDGE_THRESHOLD = 40;
+const SLIDE_BASE_WIDTH = 960;
+const SLIDE_BASE_HEIGHT = 540;
 
 const FONT_OPTIONS = ["Montserrat", "Open Sans", "Noto Sans SC"] as const;
 const COLOR_OPTIONS = [
@@ -25,11 +32,6 @@ type TextStyleState = {
   fontFamily: string;
   fontSize: number;
   color: string;
-};
-
-type ToolbarAnchor = {
-  left: number;
-  top: number;
 };
 
 type RotationIndicator = {
@@ -54,6 +56,27 @@ function normalizeRotation(value: number): number {
 
 function toDegrees(radian: number): number {
   return (radian * 180) / Math.PI;
+}
+
+function getTopToolbarPortalStyle(params: {
+  viewportRect: DOMRect | null;
+  shape: { x: number; y: number; width: number };
+}): CSSProperties | null {
+  const { viewportRect, shape } = params;
+  if (!viewportRect) {
+    return null;
+  }
+
+  const scaleX = viewportRect.width / SLIDE_BASE_WIDTH;
+  const scaleY = viewportRect.height / SLIDE_BASE_HEIGHT;
+
+  return {
+    position: "fixed",
+    left: viewportRect.left + (shape.x + shape.width / 2) * scaleX,
+    top: viewportRect.top + shape.y * scaleY - TOOLBAR_GAP,
+    transform: "translate(-50%, -100%)",
+    zIndex: 9999,
+  };
 }
 
 function toArray<T>(value: T | T[] | undefined): T[] {
@@ -522,6 +545,7 @@ function contentHtmlToXmlNode(html: string, previousContent: XmlValue | undefine
 }
 
 export function SlideShape({ shape, viewportRef, interactive = false }: SlideShapeProps) {
+  const isMobile = useIsMobile();
   const selectedShapeId = useSlideEditorStore((state) => state.selectedShapeId);
   const editingShapeId = useSlideEditorStore((state) => state.editingShapeId);
   const selectShape = useSlideEditorStore((state) => state.selectShape);
@@ -571,11 +595,79 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     fontSize: 16,
     color: "rgba(31, 35, 41, 1)",
   });
-  const [toolbarAnchor, setToolbarAnchor] = useState<ToolbarAnchor | null>(null);
   const [rotationIndicator, setRotationIndicator] = useState<RotationIndicator | null>(null);
+  const [viewportRect, setViewportRect] = useState<DOMRect | null>(null);
   const draftTextStyleRef = useRef<TextStyleState | null>(null);
   const savedCollapsedRangeRef = useRef<Range | null>(null);
   const currentRotation = shape.attributes.rotation ?? 0;
+  const rotateHandleOnTop = useMemo(() => {
+    const spaceAbove = shape.attributes.topLeftY;
+    const spaceBelow = SLIDE_BASE_HEIGHT - (shape.attributes.topLeftY + shape.attributes.height);
+    return spaceBelow < HANDLE_EDGE_THRESHOLD && spaceAbove > spaceBelow;
+  }, [shape.attributes.height, shape.attributes.topLeftY]);
+  const rotateHandleStyle = useMemo<CSSProperties>(
+    () =>
+      rotateHandleOnTop
+        ? {
+            left: "50%",
+            top: -ROTATE_HANDLE_OFFSET,
+            transform: "translate(-50%, -50%)",
+          }
+        : {
+            left: "50%",
+            top: `calc(100% + ${ROTATE_HANDLE_OFFSET}px)`,
+            transform: "translate(-50%, -50%)",
+          },
+    [rotateHandleOnTop],
+  );
+  const rotateHandleLineStyle = useMemo<CSSProperties>(
+    () =>
+      rotateHandleOnTop
+        ? {
+            left: "50%",
+            top: -ROTATE_HANDLE_OFFSET + 10,
+            height: ROTATE_HANDLE_OFFSET - 10,
+            transform: "translateX(-50%)",
+          }
+        : {
+            left: "50%",
+            top: "100%",
+            height: ROTATE_HANDLE_OFFSET - 10,
+            transform: "translateX(-50%)",
+          },
+    [rotateHandleOnTop],
+  );
+  const toolbarPortalStyle = useMemo(
+    () =>
+      getTopToolbarPortalStyle({
+        viewportRect,
+        shape: {
+          x: shape.attributes.topLeftX,
+          y: shape.attributes.topLeftY,
+          width: shape.attributes.width,
+        },
+      }),
+    [shape.attributes.topLeftX, shape.attributes.topLeftY, shape.attributes.width, viewportRect],
+  );
+
+  useEffect(() => {
+    if (!viewportRef) {
+      return;
+    }
+
+    const syncViewportRect = () => {
+      const element = viewportRef.current;
+      setViewportRect(element ? element.getBoundingClientRect() : null);
+    };
+
+    syncViewportRect();
+    window.addEventListener("resize", syncViewportRect);
+    window.addEventListener("scroll", syncViewportRect, true);
+    return () => {
+      window.removeEventListener("resize", syncViewportRect);
+      window.removeEventListener("scroll", syncViewportRect, true);
+    };
+  }, [viewportRef]);
 
   const syncShapeContentFromDom = useCallback(() => {
     if (!isInteractive) {
@@ -615,10 +707,6 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       if (!element) {
         return;
       }
-      const container = shapeRef.current;
-      if (!container) {
-        return;
-      }
 
       const selection = window.getSelection();
       if (selection && selection.rangeCount > 0) {
@@ -626,19 +714,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         const isInside = element.contains(range.commonAncestorContainer);
         if (isInside && range.collapsed) {
           savedCollapsedRangeRef.current = range.cloneRange();
-          setToolbarAnchor(null);
-        } else if (isInside && !range.collapsed) {
-          const rect = range.getBoundingClientRect();
-          const containerRect = container.getBoundingClientRect();
-          setToolbarAnchor({
-            left: rect.left + rect.width / 2 - containerRect.left,
-            top: rect.top - containerRect.top,
-          });
-        } else {
-          setToolbarAnchor(null);
         }
-      } else {
-        setToolbarAnchor(null);
       }
 
       setTextStyle(readSelectionTextStyle(element));
@@ -658,17 +734,6 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       }
 
       if (hasExpandedSelectionInside(element) && applyStyleToSelection(element, apply)) {
-        const selection = window.getSelection();
-        const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-        const container = shapeRef.current;
-        if (range && container && element.contains(range.commonAncestorContainer)) {
-          const rect = range.getBoundingClientRect();
-          const containerRect = container.getBoundingClientRect();
-          setToolbarAnchor({
-            left: rect.left + rect.width / 2 - containerRect.left,
-            top: rect.top - containerRect.top,
-          });
-        }
         setTextStyle(readSelectionTextStyle(element));
         draftTextStyleRef.current = null;
         syncShapeContentFromDom();
@@ -698,7 +763,6 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       }
 
       applyStyleToEntireContent(element, apply);
-      setToolbarAnchor(null);
       syncShapeContentFromDom();
       draftTextStyleRef.current = nextDraft;
       setTextStyle(nextDraft);
@@ -805,7 +869,9 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       setRotationIndicator({
         angle: nextRotation,
         left: "50%",
-        top: `calc(100% + ${ROTATE_HANDLE_OFFSET + 16}px)`,
+        top: rotateHandleOnTop
+          ? -ROTATE_HANDLE_OFFSET - 18
+          : `calc(100% + ${ROTATE_HANDLE_OFFSET + 16}px)`,
       });
     };
 
@@ -994,7 +1060,8 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 
       {isSelected && hasRichTextContent ? (
         <TextFormatToolbar
-          anchor={toolbarAnchor}
+          isMobile={isMobile}
+          portalStyle={toolbarPortalStyle}
           textStyle={textStyle}
           onApplyFont={(fontFamily) => {
             applyTextStyle((style) => {
@@ -1015,43 +1082,14 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       ) : null}
 
       {isSelected && isTableShape ? (
-        <div
-          className="absolute z-40 -translate-x-1/2 -translate-y-full"
-          style={{ left: "50%", top: -12 }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <div className="flex items-center gap-1 rounded-2xl border border-slate-300 bg-white px-2 py-1 shadow-[0_4px_18px_rgba(15,23,42,0.12)]">
-            <button
-              type="button"
-              className="rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
-              onClick={() => addTableRow(shapeId)}
-            >
-              + 行
-            </button>
-            <button
-              type="button"
-              className="rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
-              onClick={() => removeTableRow(shapeId)}
-            >
-              - 行
-            </button>
-            <div className="h-4 w-px bg-slate-200" />
-            <button
-              type="button"
-              className="rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
-              onClick={() => addTableColumn(shapeId)}
-            >
-              + 列
-            </button>
-            <button
-              type="button"
-              className="rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
-              onClick={() => removeTableColumn(shapeId)}
-            >
-              - 列
-            </button>
-          </div>
-        </div>
+        <TableToolbar
+          isMobile={isMobile}
+          portalStyle={toolbarPortalStyle}
+          onAddRow={() => addTableRow(shapeId)}
+          onRemoveRow={() => removeTableRow(shapeId)}
+          onAddColumn={() => addTableColumn(shapeId)}
+          onRemoveColumn={() => removeTableColumn(shapeId)}
+        />
       ) : null}
 
       {isSelected ? (
@@ -1064,25 +1102,29 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         >
           <div
             className="pointer-events-none absolute w-px bg-sky-500/70"
-            style={{
-              left: "50%",
-              top: "100%",
-              height: ROTATE_HANDLE_OFFSET - 10,
-              transform: "translateX(-50%)",
-            }}
+            style={rotateHandleLineStyle}
           />
           <div
-            className="pointer-events-auto absolute rounded-full border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
+            className="pointer-events-auto absolute"
             style={{
-              left: "50%",
-              top: `calc(100% + ${ROTATE_HANDLE_OFFSET}px)`,
-              width: RESIZE_HANDLE_SIZE,
-              height: RESIZE_HANDLE_SIZE,
-              transform: "translate(-50%, -50%)",
-              cursor: "grab",
+              ...rotateHandleStyle,
+              width: HANDLE_HIT_SIZE,
+              height: HANDLE_HIT_SIZE,
             }}
             onPointerDown={beginRotate}
-          />
+          >
+            <div
+              className="absolute rounded-full border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
+              style={{
+                left: "50%",
+                top: "50%",
+                width: RESIZE_HANDLE_SIZE,
+                height: RESIZE_HANDLE_SIZE,
+                transform: "translate(-50%, -50%)",
+                cursor: "grab",
+              }}
+            />
+          </div>
           {rotationIndicator ? (
             <div
               className="pointer-events-none absolute z-40 -translate-x-1/2 rounded-md bg-slate-900/88 px-2 py-1 text-[10px] font-medium text-white"
@@ -1095,16 +1137,26 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
             </div>
           ) : null}
           <div
-            className="pointer-events-auto absolute rounded-sm border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
+            className="pointer-events-auto absolute"
             style={{
-              right: -(RESIZE_HANDLE_SIZE / 2),
-              bottom: -(RESIZE_HANDLE_SIZE / 2),
-              width: RESIZE_HANDLE_SIZE,
-              height: RESIZE_HANDLE_SIZE,
-              cursor: "nwse-resize",
+              right: -(HANDLE_HIT_SIZE / 2),
+              bottom: -(HANDLE_HIT_SIZE / 2),
+              width: HANDLE_HIT_SIZE,
+              height: HANDLE_HIT_SIZE,
             }}
             onPointerDown={beginResize}
-          />
+          >
+            <div
+              className="absolute rounded-sm border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
+              style={{
+                right: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
+                bottom: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
+                width: RESIZE_HANDLE_SIZE,
+                height: RESIZE_HANDLE_SIZE,
+                cursor: "nwse-resize",
+              }}
+            />
+          </div>
         </div>
       ) : null}
     </div>
@@ -1112,7 +1164,8 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 }
 
 type TextFormatToolbarProps = {
-  anchor: ToolbarAnchor | null;
+  isMobile: boolean;
+  portalStyle: CSSProperties | null;
   textStyle: TextStyleState;
   onApplyFont: (fontFamily: string) => void;
   onApplyFontSize: (fontSize: number) => void;
@@ -1120,83 +1173,194 @@ type TextFormatToolbarProps = {
 };
 
 function TextFormatToolbar({
-  anchor,
+  isMobile,
+  portalStyle,
   textStyle,
   onApplyFont,
   onApplyFontSize,
   onApplyColor,
 }: TextFormatToolbarProps) {
-  return (
-    <div
-      className="absolute z-40 -translate-x-1/2 -translate-y-full"
-      style={
-        anchor
-          ? {
-              left: anchor.left,
-              top: anchor.top - 8,
-            }
-          : {
-              left: "50%",
-              top: -12,
-            }
-      }
-      onPointerDown={(event) => event.stopPropagation()}
-    >
-      <div className="flex min-w-max items-center gap-2 rounded-2xl border border-slate-300 bg-white px-2 py-1.5 shadow-[0_4px_18px_rgba(15,23,42,0.12)]">
-        <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-1">
-          {FONT_OPTIONS.map((font) => (
-            <button
-              key={font}
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => onApplyFont(font)}
-              className={`rounded-md px-2 py-1 text-xs transition-colors ${
-                textStyle.fontFamily === font
-                  ? "bg-sky-50 text-sky-700"
-                  : "text-slate-600 hover:bg-slate-100"
-              }`}
+  if (!portalStyle || typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div style={portalStyle} onPointerDown={(event) => event.stopPropagation()}>
+      <div
+        className={`flex items-center rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "gap-1 px-1.5 py-1" : "min-w-max gap-2 px-2 py-1.5"}`}
+      >
+        {isMobile ? (
+          <>
+            <label className="sr-only" htmlFor="font-family-mobile">
+              字体
+            </label>
+            <select
+              id="font-family-mobile"
+              value={textStyle.fontFamily}
+              onChange={(event) => onApplyFont(event.currentTarget.value)}
+              className="h-8 max-w-[96px] rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 outline-none"
             >
-              {font}
-            </button>
-          ))}
-        </div>
+              {FONT_OPTIONS.map((font) => (
+                <option key={font} value={font}>
+                  {font}
+                </option>
+              ))}
+            </select>
+            <div className="flex h-8 items-center rounded-md border border-slate-300">
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onApplyFontSize(Math.max(8, textStyle.fontSize - 1))}
+                className="grid h-8 w-7 place-items-center text-xs text-slate-700 hover:bg-slate-100"
+              >
+                -
+              </button>
+              <span className="w-7 text-center text-xs font-medium text-slate-800">{textStyle.fontSize}</span>
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onApplyFontSize(Math.min(96, textStyle.fontSize + 1))}
+                className="grid h-8 w-7 place-items-center text-xs text-slate-700 hover:bg-slate-100"
+              >
+                +
+              </button>
+            </div>
+            <label className="sr-only" htmlFor="font-color-mobile">
+              颜色
+            </label>
+            <select
+              id="font-color-mobile"
+              value={textStyle.color}
+              onChange={(event) => onApplyColor(event.currentTarget.value)}
+              className="h-8 max-w-[92px] rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 outline-none"
+            >
+              {COLOR_OPTIONS.map((color) => (
+                <option key={color} value={color}>
+                  {color}
+                </option>
+              ))}
+            </select>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-1">
+              {FONT_OPTIONS.map((font) => (
+                <button
+                  key={font}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onApplyFont(font)}
+                  className={`rounded-md px-2 py-1 text-xs transition-colors ${
+                    textStyle.fontFamily === font
+                      ? "bg-sky-50 text-sky-700"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  {font}
+                </button>
+              ))}
+            </div>
 
-        <div className="flex h-8 items-center rounded-xl border border-slate-300">
-          <button
-            type="button"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => onApplyFontSize(Math.max(8, textStyle.fontSize - 1))}
-            className="grid h-8 w-8 place-items-center rounded-l-xl text-slate-700 hover:bg-slate-100"
-          >
-            -
-          </button>
-          <span className="w-10 text-center text-sm font-medium text-slate-800">{textStyle.fontSize}</span>
-          <button
-            type="button"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => onApplyFontSize(Math.min(96, textStyle.fontSize + 1))}
-            className="grid h-8 w-8 place-items-center rounded-r-xl text-slate-700 hover:bg-slate-100"
-          >
-            +
-          </button>
-        </div>
+            <div className="flex h-8 items-center rounded-xl border border-slate-300">
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onApplyFontSize(Math.max(8, textStyle.fontSize - 1))}
+                className="grid h-8 w-8 place-items-center rounded-l-xl text-slate-700 hover:bg-slate-100"
+              >
+                -
+              </button>
+              <span className="w-10 text-center text-sm font-medium text-slate-800">{textStyle.fontSize}</span>
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onApplyFontSize(Math.min(96, textStyle.fontSize + 1))}
+                className="grid h-8 w-8 place-items-center rounded-r-xl text-slate-700 hover:bg-slate-100"
+              >
+                +
+              </button>
+            </div>
 
-        <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-1">
-          {COLOR_OPTIONS.map((color) => (
-            <button
-              key={color}
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => onApplyColor(color)}
-              className="h-6 w-6 rounded-full border border-slate-200"
-              style={{
-                backgroundColor: color,
-                boxShadow: textStyle.color === color ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
-              }}
-            />
-          ))}
-        </div>
+            <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-1">
+              {COLOR_OPTIONS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => onApplyColor(color)}
+                  className="h-6 w-6 rounded-full border border-slate-200"
+                  style={{
+                    backgroundColor: color,
+                    boxShadow: textStyle.color === color ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
+                  }}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </div>
-    </div>
+    </div>,
+    document.body,
+  );
+}
+
+type TableToolbarProps = {
+  isMobile: boolean;
+  portalStyle: CSSProperties | null;
+  onAddRow: () => void;
+  onRemoveRow: () => void;
+  onAddColumn: () => void;
+  onRemoveColumn: () => void;
+};
+
+function TableToolbar({
+  isMobile,
+  portalStyle,
+  onAddRow,
+  onRemoveRow,
+  onAddColumn,
+  onRemoveColumn,
+}: TableToolbarProps) {
+  if (!portalStyle || typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div style={portalStyle} onPointerDown={(event) => event.stopPropagation()}>
+      <div
+        className={`flex items-center gap-1 rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "px-1.5 py-1" : "px-2 py-1"}`}
+      >
+        <button
+          type="button"
+          className={`rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          onClick={onAddRow}
+        >
+          + 行
+        </button>
+        <button
+          type="button"
+          className={`rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          onClick={onRemoveRow}
+        >
+          - 行
+        </button>
+        <div className="h-4 w-px bg-slate-200" />
+        <button
+          type="button"
+          className={`rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          onClick={onAddColumn}
+        >
+          + 列
+        </button>
+        <button
+          type="button"
+          className={`rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          onClick={onRemoveColumn}
+        >
+          - 列
+        </button>
+      </div>
+    </div>,
+    document.body,
   );
 }

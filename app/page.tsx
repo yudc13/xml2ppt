@@ -2,10 +2,16 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  CircleAlert,
   Check,
   ChevronDown,
+  Eye,
+  EyeOff,
   Loader2,
   Palette,
+  Save,
   Shapes,
   Sparkles,
   Table2,
@@ -194,7 +200,7 @@ function Toolbar({ slideIndex }: { slideIndex: number }) {
           <span className="grid h-5 w-5 place-items-center rounded-full bg-slate-800 text-white">
             <Sparkles className="h-3 w-3" />
           </span>
-          Ask AI
+          <span className="hidden md:inline">Ask AI</span>
         </button>
 
         <div className="mx-1.5 h-6 w-px bg-slate-200" />
@@ -238,36 +244,48 @@ function Toolbar({ slideIndex }: { slideIndex: number }) {
           disabled={isSaving}
           className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
         >
-          {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          {saveStatus === "success" ? <Check className="h-4 w-4 text-emerald-600" /> : null}
-          {saveStatus === "error" ? "保存失败" : isSaving ? "保存中..." : saveStatus === "success" ? "已保存" : "保存"}
+          {isSaving ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : saveStatus === "success" ? (
+            <Check className="h-4 w-4 text-emerald-600" />
+          ) : saveStatus === "error" ? (
+            <CircleAlert className="h-4 w-4 text-rose-600" />
+          ) : (
+            <Save className="h-4 w-4" />
+          )}
+          <span className="hidden md:inline">
+            {saveStatus === "error" ? "保存失败" : isSaving ? "保存中..." : saveStatus === "success" ? "已保存" : "保存"}
+          </span>
         </button>
         <button
           type="button"
           onClick={() => setPreviewMode(!isPreviewMode)}
-          className={`cursor-pointer rounded-xl px-3 py-1.5 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${
+          className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${
             isPreviewMode
               ? "bg-sky-50 text-sky-700 hover:bg-sky-100/80"
               : "text-slate-700 hover:bg-slate-100/80"
           }`}
         >
-          {isPreviewMode ? "退出预览" : "预览"}
+          {isPreviewMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          <span className="hidden md:inline">{isPreviewMode ? "退出预览" : "预览"}</span>
         </button>
         <button
           type="button"
           disabled={!selectedShapeId}
           onClick={bringToFront}
-          className="cursor-pointer rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
+          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
         >
-          置顶
+          <ArrowUpToLine className="h-4 w-4" />
+          <span className="hidden md:inline">置顶</span>
         </button>
         <button
           type="button"
           disabled={!selectedShapeId}
           onClick={sendToBack}
-          className="cursor-pointer rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
+          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
         >
-          置底
+          <ArrowDownToLine className="h-4 w-4" />
+          <span className="hidden md:inline">置底</span>
         </button>
 
         <div className="mx-1.5 h-6 w-px bg-slate-200" />
@@ -280,7 +298,7 @@ function Toolbar({ slideIndex }: { slideIndex: number }) {
         </button>
         <button
           type="button"
-          className="cursor-pointer rounded-xl px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+          className="hidden cursor-pointer rounded-xl px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 md:block"
         >
           65%
         </button>
@@ -302,7 +320,7 @@ function ToolbarButton({ icon, label }: { icon: ReactNode; label: string }) {
       className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
     >
       {icon}
-      {label}
+      <span className="hidden md:inline">{label}</span>
     </button>
   );
 }
@@ -327,8 +345,8 @@ function ToolbarMenu({
           className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
         >
           {icon}
-          {label}
-          <ChevronDown className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">{label}</span>
+          <ChevronDown className="hidden h-3.5 w-3.5 md:block" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-36">
