@@ -1,11 +1,28 @@
 import { create } from "zustand";
 
 import { buildShapeContentHtml } from "@/lib/slide-xml/rich-text";
-import type { ShapeAttributes, ShapeStyle, SlideDocumentModel, XmlNode, XmlValue } from "@/lib/slide-xml/types";
+import type {
+  ShapeAttributes,
+  ShapeStyle,
+  SlideDocumentModel,
+  TableModel,
+  TextPresetType,
+  XmlNode,
+  XmlValue,
+} from "@/lib/slide-xml/types";
 
 const SLIDE_WIDTH = 960;
 const SLIDE_HEIGHT = 540;
 const MIN_SHAPE_SIZE = 12;
+const DEFAULT_INSERT_WIDTH = 320;
+const DEFAULT_INSERT_HEIGHT = 120;
+const DEFAULT_SHAPE_SIZE = 160;
+const DEFAULT_LINE_WIDTH = 280;
+const DEFAULT_LINE_HEIGHT = 4;
+const DEFAULT_TABLE_ROWS = 3;
+const DEFAULT_TABLE_COLUMNS = 3;
+
+type InsertShapeType = "rect" | "ellipse" | "line" | "arrow";
 
 type EditableSlideShape = {
   id: string;
@@ -21,6 +38,7 @@ type SlideEditorState = {
   currentSlideMeta: Pick<SlideDocumentModel, "slideId" | "rawSlideNode"> | null;
   isPreviewMode: boolean;
   shapes: EditableSlideShape[];
+  clipboardShape: EditableSlideShape | null;
   selectedShapeId: string | null;
   editingShapeId: string | null;
   initializeSlide: (slideIndex: number, model: SlideDocumentModel) => void;
@@ -30,6 +48,17 @@ type SlideEditorState = {
   updateShapePosition: (shapeId: string, topLeftX: number, topLeftY: number) => void;
   updateShapeSize: (shapeId: string, width: number, height: number) => void;
   updateShapeContent: (shapeId: string, contentHtml: string, contentNode?: XmlValue) => void;
+  updateTableCell: (shapeId: string, rowIndex: number, colIndex: number, text: string) => void;
+  addTableRow: (shapeId: string) => void;
+  removeTableRow: (shapeId: string) => void;
+  addTableColumn: (shapeId: string) => void;
+  removeTableColumn: (shapeId: string) => void;
+  copySelectedShape: () => void;
+  pasteCopiedShape: () => void;
+  deleteSelectedShape: () => void;
+  insertTextPreset: (preset: TextPresetType) => void;
+  insertShape: (shapeType: InsertShapeType) => void;
+  insertTable: (rows?: number, columns?: number) => void;
   bringToFront: () => void;
   sendToBack: () => void;
   buildSlideDocumentModel: () => SlideDocumentModel | null;
@@ -70,11 +99,226 @@ function updateShape(
   });
 }
 
+function createId(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function toInsertPosition(width: number, height: number): Pick<ShapeAttributes, "topLeftX" | "topLeftY"> {
+  return {
+    topLeftX: round2((SLIDE_WIDTH - width) / 2),
+    topLeftY: round2((SLIDE_HEIGHT - height) / 2),
+  };
+}
+
+function getNextZIndex(shapes: EditableSlideShape[]): number {
+  if (shapes.length === 0) {
+    return 0;
+  }
+
+  return Math.max(...shapes.map((shape) => shape.zIndex)) + 1;
+}
+
+function buildTextPresetContentNode(preset: TextPresetType): XmlNode {
+  const presetMap: Record<
+    TextPresetType,
+    { text: string; fontSize: number; fontFamily: string; bold: boolean }
+  > = {
+    display: { text: "大标题", fontSize: 44, fontFamily: "Montserrat", bold: true },
+    title: { text: "标题", fontSize: 32, fontFamily: "Montserrat", bold: true },
+    subtitle: { text: "副标题", fontSize: 24, fontFamily: "Montserrat", bold: true },
+    body: { text: "正文", fontSize: 18, fontFamily: "Open Sans", bold: false },
+    "body-small": { text: "小号正文", fontSize: 14, fontFamily: "Open Sans", bold: false },
+  };
+
+  const presetStyle = presetMap[preset];
+  const spanNode: XmlNode = {
+    "#text": presetStyle.text,
+    "@_fontSize": presetStyle.fontSize,
+    "@_fontFamily": presetStyle.fontFamily,
+    "@_color": "rgba(31, 35, 41, 1)",
+  };
+
+  return {
+    "@_verticalAlign": "top",
+    p: {
+      ...(presetStyle.bold ? { strong: { span: spanNode } } : { span: spanNode }),
+    },
+  };
+}
+
+function buildDefaultTableModel(rows: number, columns: number): TableModel {
+  const safeRows = Math.max(1, rows);
+  const safeColumns = Math.max(1, columns);
+
+  return {
+    rows: Array.from({ length: safeRows }, (_, rowIndex) => ({
+      id: createId(`row-${rowIndex + 1}`),
+      cells: Array.from({ length: safeColumns }, (_, colIndex) => ({
+        id: createId(`cell-${rowIndex + 1}-${colIndex + 1}`),
+        text: "",
+      })),
+    })),
+  };
+}
+
+function buildTableContentNode(table: TableModel): XmlNode {
+  return {
+    table: {
+      row: table.rows.map((row) => ({
+        "@_id": row.id,
+        cell: row.cells.map((cell) => ({
+          "@_id": cell.id,
+          "#text": cell.text,
+        })),
+      })),
+    },
+  };
+}
+
+function toArray<T>(value: T | T[] | undefined): T[] {
+  if (!value) {
+    return [];
+  }
+
+  return Array.isArray(value) ? value : [value];
+}
+
+function parseTableModel(contentNode: XmlValue | undefined): TableModel | null {
+  if (!contentNode || typeof contentNode !== "object" || Array.isArray(contentNode)) {
+    return null;
+  }
+
+  const content = contentNode as XmlNode;
+  const tableValue = content.table;
+  if (!tableValue || typeof tableValue !== "object" || Array.isArray(tableValue)) {
+    return null;
+  }
+
+  const tableNode = tableValue as XmlNode;
+  const rowNodes = toArray(tableNode.row as XmlValue | XmlValue[] | undefined);
+  if (rowNodes.length === 0) {
+    return null;
+  }
+
+  const rows = rowNodes
+    .map((rowValue, rowIndex) => {
+      if (!rowValue || typeof rowValue !== "object" || Array.isArray(rowValue)) {
+        return null;
+      }
+
+      const rowNode = rowValue as XmlNode;
+      const rowId = typeof rowNode["@_id"] === "string" ? rowNode["@_id"] : createId(`row-${rowIndex + 1}`);
+      const cellNodes = toArray(rowNode.cell as XmlValue | XmlValue[] | undefined);
+      const cells = cellNodes
+        .map((cellValue, colIndex) => {
+          if (!cellValue || typeof cellValue !== "object" || Array.isArray(cellValue)) {
+            return null;
+          }
+
+          const cellNode = cellValue as XmlNode;
+          return {
+            id:
+              typeof cellNode["@_id"] === "string"
+                ? cellNode["@_id"]
+                : createId(`cell-${rowIndex + 1}-${colIndex + 1}`),
+            text: typeof cellNode["#text"] === "string" ? cellNode["#text"] : "",
+          };
+        })
+        .filter((cell): cell is { id: string; text: string } => Boolean(cell));
+
+      if (cells.length === 0) {
+        return null;
+      }
+
+      return {
+        id: rowId,
+        cells,
+      };
+    })
+    .filter((row): row is TableModel["rows"][number] => Boolean(row));
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return { rows };
+}
+
+function createEditableShape(params: {
+  id: string;
+  type: ShapeAttributes["type"];
+  width: number;
+  height: number;
+  style?: ShapeStyle;
+  rawNode: XmlNode;
+  contentNode?: XmlNode;
+  zIndex: number;
+}): EditableSlideShape {
+  const normalized = normalizeShapeAttributes({
+    id: params.id,
+    type: params.type,
+    width: params.width,
+    height: params.height,
+    ...toInsertPosition(params.width, params.height),
+  });
+  const mergedRawNode: XmlNode = {
+    ...params.rawNode,
+    "@_id": normalized.id,
+    "@_type": normalized.type,
+    "@_width": normalized.width,
+    "@_height": normalized.height,
+    "@_topLeftX": normalized.topLeftX,
+    "@_topLeftY": normalized.topLeftY,
+  };
+
+  if (params.contentNode) {
+    mergedRawNode.content = params.contentNode;
+  }
+
+  return {
+    id: normalized.id,
+    attributes: normalized,
+    style: params.style ?? {},
+    rawNode: mergedRawNode,
+    contentHtml: params.contentNode ? buildShapeContentHtml(params.contentNode) : "",
+    zIndex: params.zIndex,
+  };
+}
+
+function cloneShapeForDuplicate(source: EditableSlideShape, offset = 24): EditableSlideShape {
+  const id = createId("shape-copy");
+  const attributes = normalizeShapeAttributes({
+    ...source.attributes,
+    id,
+    topLeftX: source.attributes.topLeftX + offset,
+    topLeftY: source.attributes.topLeftY + offset,
+  });
+  const rawNode = structuredClone(source.rawNode);
+  rawNode["@_id"] = attributes.id;
+  rawNode["@_topLeftX"] = attributes.topLeftX;
+  rawNode["@_topLeftY"] = attributes.topLeftY;
+  rawNode["@_width"] = attributes.width;
+  rawNode["@_height"] = attributes.height;
+
+  return {
+    ...source,
+    id,
+    attributes,
+    rawNode,
+    zIndex: source.zIndex + 1,
+  };
+}
+
 export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
   currentSlideIndex: null,
   currentSlideMeta: null,
   isPreviewMode: false,
   shapes: [],
+  clipboardShape: null,
   selectedShapeId: null,
   editingShapeId: null,
   initializeSlide: (slideIndex, model) => {
@@ -160,6 +404,300 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
         },
       })),
     }));
+  },
+  updateTableCell: (shapeId, rowIndex, colIndex, text) => {
+    set((state) => ({
+      shapes: updateShape(state.shapes, shapeId, (shape) => {
+        if (shape.attributes.type !== "table") {
+          return shape;
+        }
+
+        const tableModel = parseTableModel(shape.rawNode.content);
+        if (!tableModel) {
+          return shape;
+        }
+
+        const rows = tableModel.rows.map((row, currentRowIndex) => {
+          if (currentRowIndex !== rowIndex) {
+            return row;
+          }
+
+          return {
+            ...row,
+            cells: row.cells.map((cell, currentColIndex) =>
+              currentColIndex === colIndex ? { ...cell, text } : cell,
+            ),
+          };
+        });
+
+        return {
+          ...shape,
+          contentHtml: "",
+          rawNode: {
+            ...shape.rawNode,
+            content: buildTableContentNode({ rows }),
+          },
+        };
+      }),
+    }));
+  },
+  addTableRow: (shapeId) => {
+    set((state) => ({
+      shapes: updateShape(state.shapes, shapeId, (shape) => {
+        if (shape.attributes.type !== "table") {
+          return shape;
+        }
+
+        const tableModel = parseTableModel(shape.rawNode.content) ?? buildDefaultTableModel(1, 1);
+        const columnCount = Math.max(1, tableModel.rows[0]?.cells.length ?? 1);
+        const nextRowIndex = tableModel.rows.length + 1;
+        const nextRow = {
+          id: createId(`row-${nextRowIndex}`),
+          cells: Array.from({ length: columnCount }, (_, colIndex) => ({
+            id: createId(`cell-${nextRowIndex}-${colIndex + 1}`),
+            text: "",
+          })),
+        };
+        const rows = [...tableModel.rows, nextRow];
+
+        return {
+          ...shape,
+          attributes: {
+            ...shape.attributes,
+            height: round2(clamp(Math.max(shape.attributes.height, rows.length * 44), MIN_SHAPE_SIZE, SLIDE_HEIGHT)),
+          },
+          contentHtml: "",
+          rawNode: {
+            ...shape.rawNode,
+            content: buildTableContentNode({ rows }),
+          },
+        };
+      }),
+    }));
+  },
+  removeTableRow: (shapeId) => {
+    set((state) => ({
+      shapes: updateShape(state.shapes, shapeId, (shape) => {
+        if (shape.attributes.type !== "table") {
+          return shape;
+        }
+
+        const tableModel = parseTableModel(shape.rawNode.content);
+        if (!tableModel || tableModel.rows.length <= 1) {
+          return shape;
+        }
+
+        const rows = tableModel.rows.slice(0, -1);
+        return {
+          ...shape,
+          contentHtml: "",
+          rawNode: {
+            ...shape.rawNode,
+            content: buildTableContentNode({ rows }),
+          },
+        };
+      }),
+    }));
+  },
+  addTableColumn: (shapeId) => {
+    set((state) => ({
+      shapes: updateShape(state.shapes, shapeId, (shape) => {
+        if (shape.attributes.type !== "table") {
+          return shape;
+        }
+
+        const tableModel = parseTableModel(shape.rawNode.content) ?? buildDefaultTableModel(1, 1);
+        const rows = tableModel.rows.map((row, rowIndex) => ({
+          ...row,
+          cells: [
+            ...row.cells,
+            {
+              id: createId(`cell-${rowIndex + 1}-${row.cells.length + 1}`),
+              text: "",
+            },
+          ],
+        }));
+
+        return {
+          ...shape,
+          attributes: {
+            ...shape.attributes,
+            width: round2(
+              clamp(Math.max(shape.attributes.width, (rows[0]?.cells.length ?? 1) * 120), MIN_SHAPE_SIZE, SLIDE_WIDTH),
+            ),
+          },
+          contentHtml: "",
+          rawNode: {
+            ...shape.rawNode,
+            content: buildTableContentNode({ rows }),
+          },
+        };
+      }),
+    }));
+  },
+  removeTableColumn: (shapeId) => {
+    set((state) => ({
+      shapes: updateShape(state.shapes, shapeId, (shape) => {
+        if (shape.attributes.type !== "table") {
+          return shape;
+        }
+
+        const tableModel = parseTableModel(shape.rawNode.content);
+        const columnCount = tableModel?.rows[0]?.cells.length ?? 1;
+        if (!tableModel || columnCount <= 1) {
+          return shape;
+        }
+
+        const rows = tableModel.rows.map((row) => ({
+          ...row,
+          cells: row.cells.slice(0, -1),
+        }));
+
+        return {
+          ...shape,
+          contentHtml: "",
+          rawNode: {
+            ...shape.rawNode,
+            content: buildTableContentNode({ rows }),
+          },
+        };
+      }),
+    }));
+  },
+  copySelectedShape: () => {
+    set((state) => {
+      if (!state.selectedShapeId) {
+        return state;
+      }
+
+      const selected = state.shapes.find((shape) => shape.id === state.selectedShapeId);
+      if (!selected) {
+        return state;
+      }
+
+      return {
+        clipboardShape: structuredClone(selected),
+      };
+    });
+  },
+  pasteCopiedShape: () => {
+    set((state) => {
+      const source =
+        state.clipboardShape ??
+        (state.selectedShapeId ? state.shapes.find((shape) => shape.id === state.selectedShapeId) : null);
+      if (!source) {
+        return state;
+      }
+
+      const duplicated = cloneShapeForDuplicate(source);
+      const nextZIndex = getNextZIndex(state.shapes);
+
+      return {
+        shapes: [...state.shapes, { ...duplicated, zIndex: nextZIndex }],
+        selectedShapeId: duplicated.id,
+        editingShapeId: duplicated.attributes.type === "table" ? duplicated.id : null,
+        clipboardShape: structuredClone(source),
+      };
+    });
+  },
+  deleteSelectedShape: () => {
+    set((state) => {
+      if (!state.selectedShapeId) {
+        return state;
+      }
+
+      return {
+        shapes: state.shapes.filter((shape) => shape.id !== state.selectedShapeId),
+        selectedShapeId: null,
+        editingShapeId: state.editingShapeId === state.selectedShapeId ? null : state.editingShapeId,
+      };
+    });
+  },
+  insertTextPreset: (preset) => {
+    set((state) => {
+      const shapeId = createId("shape-text");
+      const contentNode = buildTextPresetContentNode(preset);
+      const nextShape = createEditableShape({
+        id: shapeId,
+        type: "text",
+        width: DEFAULT_INSERT_WIDTH,
+        height: DEFAULT_INSERT_HEIGHT,
+        rawNode: {
+          fill: {
+            fillColor: {
+              "@_color": "rgba(255, 255, 255, 0)",
+            },
+          },
+        },
+        contentNode,
+        zIndex: getNextZIndex(state.shapes),
+      });
+
+      return {
+        shapes: [...state.shapes, nextShape],
+        selectedShapeId: nextShape.id,
+        editingShapeId: nextShape.id,
+      };
+    });
+  },
+  insertShape: (shapeType) => {
+    set((state) => {
+      const shapeId = createId(`shape-${shapeType}`);
+      const isLineLike = shapeType === "line" || shapeType === "arrow";
+      const nextShape = createEditableShape({
+        id: shapeId,
+        type: shapeType,
+        width: isLineLike ? DEFAULT_LINE_WIDTH : DEFAULT_SHAPE_SIZE,
+        height: isLineLike ? DEFAULT_LINE_HEIGHT : DEFAULT_SHAPE_SIZE,
+        style: shapeType === "ellipse" ? { borderRadius: "9999px" } : {},
+        rawNode: {
+          fill: {
+            fillColor: {
+              "@_color": isLineLike ? "rgba(255, 255, 255, 0)" : "rgba(13, 116, 206, 0.08)",
+            },
+          },
+          border: {
+            "@_color": "rgba(13, 116, 206, 1)",
+            "@_width": 2,
+          },
+        },
+        zIndex: getNextZIndex(state.shapes),
+      });
+
+      return {
+        shapes: [...state.shapes, nextShape],
+        selectedShapeId: nextShape.id,
+        editingShapeId: null,
+      };
+    });
+  },
+  insertTable: (rows = DEFAULT_TABLE_ROWS, columns = DEFAULT_TABLE_COLUMNS) => {
+    set((state) => {
+      const shapeId = createId("shape-table");
+      const tableModel = buildDefaultTableModel(rows, columns);
+      const width = 420;
+      const height = Math.max(140, tableModel.rows.length * 44);
+      const nextShape = createEditableShape({
+        id: shapeId,
+        type: "table",
+        width,
+        height,
+        rawNode: {
+          border: {
+            "@_color": "rgba(31, 35, 41, 0.25)",
+            "@_width": 1,
+          },
+        },
+        contentNode: buildTableContentNode(tableModel),
+        zIndex: getNextZIndex(state.shapes),
+      });
+
+      return {
+        shapes: [...state.shapes, nextShape],
+        selectedShapeId: nextShape.id,
+        editingShapeId: nextShape.id,
+      };
+    });
   },
   bringToFront: () => {
     set((state) => {

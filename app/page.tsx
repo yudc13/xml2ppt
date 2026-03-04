@@ -1,9 +1,9 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
   Check,
-  ImageIcon,
+  ChevronDown,
   Loader2,
   Palette,
   Shapes,
@@ -26,6 +26,14 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const INITIAL_ACTIVE_SLIDE_INDEX = 0;
 
@@ -77,12 +85,56 @@ function Toolbar({ slideIndex }: { slideIndex: number }) {
   const selectedShapeId = useSlideEditorStore((state) => state.selectedShapeId);
   const bringToFront = useSlideEditorStore((state) => state.bringToFront);
   const sendToBack = useSlideEditorStore((state) => state.sendToBack);
+  const insertTextPreset = useSlideEditorStore((state) => state.insertTextPreset);
+  const insertShape = useSlideEditorStore((state) => state.insertShape);
+  const insertTable = useSlideEditorStore((state) => state.insertTable);
   const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
   const setPreviewMode = useSlideEditorStore((state) => state.setPreviewMode);
   const buildSlideDocumentModel = useSlideEditorStore((state) => state.buildSlideDocumentModel);
+  const copySelectedShape = useSlideEditorStore((state) => state.copySelectedShape);
+  const pasteCopiedShape = useSlideEditorStore((state) => state.pasteCopiedShape);
+  const deleteSelectedShape = useSlideEditorStore((state) => state.deleteSelectedShape);
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isPreviewMode) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName?.toLowerCase();
+      const isTypingTarget =
+        !!target?.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select";
+
+      if (isTypingTarget) {
+        return;
+      }
+
+      const isMeta = event.metaKey || event.ctrlKey;
+      if (isMeta && event.key.toLowerCase() === "c") {
+        event.preventDefault();
+        copySelectedShape();
+        return;
+      }
+
+      if (isMeta && event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        pasteCopiedShape();
+        return;
+      }
+
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        deleteSelectedShape();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [copySelectedShape, deleteSelectedShape, isPreviewMode, pasteCopiedShape]);
 
   const handleSave = async () => {
     const model = buildSlideDocumentModel();
@@ -133,10 +185,35 @@ function Toolbar({ slideIndex }: { slideIndex: number }) {
 
         <div className="mx-1.5 h-6 w-px bg-slate-200" />
 
-        <ToolbarButton icon={<Type className="h-4 w-4" />} label="文本" />
-        <ToolbarButton icon={<Shapes className="h-4 w-4" />} label="图形" />
-        <ToolbarButton icon={<ImageIcon className="h-4 w-4" />} label="图片" />
-        <ToolbarButton icon={<Table2 className="h-4 w-4" />} label="表格" />
+        <ToolbarMenu
+          icon={<Type className="h-4 w-4" />}
+          label="文本"
+          disabled={isPreviewMode}
+          items={[
+            { label: "大标题", onClick: () => insertTextPreset("display") },
+            { label: "标题", onClick: () => insertTextPreset("title") },
+            { label: "副标题", onClick: () => insertTextPreset("subtitle") },
+            { label: "正文", onClick: () => insertTextPreset("body") },
+            { label: "小号正文", onClick: () => insertTextPreset("body-small") },
+          ]}
+        />
+        <ToolbarMenu
+          icon={<Shapes className="h-4 w-4" />}
+          label="图形"
+          disabled={isPreviewMode}
+          items={[
+            { label: "矩形", onClick: () => insertShape("rect") },
+            { label: "圆", onClick: () => insertShape("ellipse") },
+            { label: "直线", onClick: () => insertShape("line") },
+            { label: "单向箭头", onClick: () => insertShape("arrow") },
+          ]}
+        />
+        <ToolbarMenu
+          icon={<Table2 className="h-4 w-4" />}
+          label="表格"
+          disabled={isPreviewMode}
+          items={[{ label: "插入 3 x 3 表格", onClick: () => insertTable(3, 3) }]}
+        />
 
         <div className="mx-1.5 h-6 w-px bg-slate-200" />
 
@@ -213,5 +290,42 @@ function ToolbarButton({ icon, label }: { icon: ReactNode; label: string }) {
       {icon}
       {label}
     </button>
+  );
+}
+
+function ToolbarMenu({
+  icon,
+  label,
+  items,
+  disabled,
+}: {
+  icon: ReactNode;
+  label: string;
+  items: { label: string; onClick: () => void }[];
+  disabled?: boolean;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
+        >
+          {icon}
+          {label}
+          <ChevronDown className="h-3.5 w-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-36">
+        <DropdownMenuLabel>{label}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {items.map((item) => (
+          <DropdownMenuItem key={item.label} onSelect={item.onClick}>
+            {item.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

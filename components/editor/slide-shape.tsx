@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSlideEditorStore } from "@/features/slide-editor/store";
 import type { EditableSlideShape } from "@/features/slide-editor/store";
 import { buildShapeContentHtml } from "@/lib/slide-xml/rich-text";
-import type { SlideShapeModel, XmlNode, XmlValue } from "@/lib/slide-xml/types";
+import type { SlideShapeModel, TableModel, XmlNode, XmlValue } from "@/lib/slide-xml/types";
 
 const RESIZE_HANDLE_SIZE = 10;
 
@@ -89,6 +89,89 @@ function getBorderColor(shapeNode: XmlNode): string | undefined {
   const borderNode = border as XmlNode;
   const color = borderNode["@_color"];
   return typeof color === "string" ? color : undefined;
+}
+
+function getBorderWidth(shapeNode: XmlNode): number {
+  const border = shapeNode.border;
+  if (!border || typeof border !== "object" || Array.isArray(border)) {
+    return 2;
+  }
+
+  const borderNode = border as XmlNode;
+  const width = Number(borderNode["@_width"]);
+  return Number.isFinite(width) && width > 0 ? width : 2;
+}
+
+function getShapeText(value: XmlValue | undefined): string {
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => getShapeText(item)).join("");
+  }
+
+  const node = value as XmlNode;
+  const ownText = typeof node["#text"] === "string" ? node["#text"] : "";
+  const childrenText = Object.entries(node)
+    .filter(([key]) => !key.startsWith("@_") && key !== "#text")
+    .map(([, childValue]) => getShapeText(childValue as XmlValue))
+    .join("");
+
+  return `${ownText}${childrenText}`.trim();
+}
+
+function parseTableModel(contentNode: XmlValue | undefined): TableModel {
+  if (!contentNode || typeof contentNode !== "object" || Array.isArray(contentNode)) {
+    return { rows: [] };
+  }
+
+  const content = contentNode as XmlNode;
+  const table = content.table;
+  if (!table || typeof table !== "object" || Array.isArray(table)) {
+    return { rows: [] };
+  }
+
+  const tableNode = table as XmlNode;
+  const rows = toArray(tableNode.row as XmlValue | XmlValue[] | undefined);
+
+  const parsedRows = rows
+    .map((row, rowIndex) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) {
+        return null;
+      }
+
+      const rowNode = row as XmlNode;
+      const cells = toArray(rowNode.cell as XmlValue | XmlValue[] | undefined);
+      return {
+        id: typeof rowNode["@_id"] === "string" ? rowNode["@_id"] : `row-${rowIndex + 1}`,
+        cells: cells.map((cell, cellIndex) => {
+          const text = getShapeText(cell).trim();
+          if (!cell || typeof cell !== "object" || Array.isArray(cell)) {
+            return {
+              id: `cell-${rowIndex + 1}-${cellIndex + 1}`,
+              text,
+            };
+          }
+
+          const cellNode = cell as XmlNode;
+          return {
+            id:
+              typeof cellNode["@_id"] === "string"
+                ? cellNode["@_id"]
+                : `cell-${rowIndex + 1}-${cellIndex + 1}`,
+            text,
+          };
+        }),
+      };
+    })
+    .filter((row): row is TableModel["rows"][number] => Boolean(row && row.cells.length > 0));
+
+  return { rows: parsedRows };
 }
 
 function normalizeColor(value: string): string {
@@ -430,23 +513,39 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const updateShapePosition = useSlideEditorStore((state) => state.updateShapePosition);
   const updateShapeSize = useSlideEditorStore((state) => state.updateShapeSize);
   const updateShapeContent = useSlideEditorStore((state) => state.updateShapeContent);
+  const updateTableCell = useSlideEditorStore((state) => state.updateTableCell);
+  const addTableRow = useSlideEditorStore((state) => state.addTableRow);
+  const removeTableRow = useSlideEditorStore((state) => state.removeTableRow);
+  const addTableColumn = useSlideEditorStore((state) => state.addTableColumn);
+  const removeTableColumn = useSlideEditorStore((state) => state.removeTableColumn);
 
   const editableRef = useRef<HTMLDivElement | null>(null);
   const shapeRef = useRef<HTMLDivElement | null>(null);
 
   const backgroundColor = useMemo(() => getFillColor(shape.rawNode), [shape.rawNode]);
   const borderColor = useMemo(() => getBorderColor(shape.rawNode), [shape.rawNode]);
+  const borderWidth = useMemo(() => getBorderWidth(shape.rawNode), [shape.rawNode]);
 
   const isInteractive = interactive;
   const shapeId = "id" in shape ? shape.id : shape.attributes.id;
+  const shapeType = shape.attributes.type;
+  const isTableShape = shapeType === "table";
+  const isEllipseShape = shapeType === "ellipse";
+  const isLineShape = shapeType === "line";
+  const isArrowShape = shapeType === "arrow";
+  const isLineLikeShape = isLineShape || isArrowShape;
   const contentHtml =
     "contentHtml" in shape
       ? shape.contentHtml
       : shape.rawNode.content
         ? buildShapeContentHtml(shape.rawNode.content)
         : "";
-
-  const hasContent = contentHtml.length > 0;
+  const hasRichTextContent = !isTableShape && contentHtml.length > 0;
+  const tableModel = useMemo(() => parseTableModel(shape.rawNode.content), [shape.rawNode.content]);
+  const arrowMarkerId = useMemo(
+    () => `shape-arrow-${shapeId.replace(/[^a-zA-Z0-9_-]/g, "")}`,
+    [shapeId],
+  );
   const isSelected = isInteractive && selectedShapeId === shapeId;
   const isEditing = isInteractive && editingShapeId === shapeId;
   const [textStyle, setTextStyle] = useState<TextStyleState>({
@@ -479,11 +578,9 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       return;
     }
 
-    if (isEditing) {
-      return;
-    }
-
-    if (element.innerHTML !== contentHtml) {
+    // When a new shape enters edit mode immediately after insertion, hydrate once.
+    const shouldHydrateWhileEditing = isEditing && element.innerHTML.trim().length === 0;
+    if (!isEditing || shouldHydrateWhileEditing) {
       element.innerHTML = contentHtml;
     }
   }, [contentHtml, isEditing]);
@@ -671,14 +768,87 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       <div
         className="h-full w-full overflow-hidden"
         style={{
-          background: backgroundColor,
-          borderRadius: shape.style.borderRadius,
-          border: borderColor ? `1px solid ${borderColor}` : undefined,
+          background: isLineLikeShape ? undefined : backgroundColor,
+          borderRadius: isEllipseShape ? "9999px" : shape.style.borderRadius,
+          border: !isLineLikeShape && borderColor ? `${borderWidth}px solid ${borderColor}` : undefined,
           outline: isSelected ? "2px solid rgba(14, 116, 244, 0.7)" : undefined,
           outlineOffset: isSelected ? "-1px" : undefined,
         }}
       >
-        {hasContent ? (
+        {isLineLikeShape ? (
+          <svg className="h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+            {isArrowShape ? (
+              <defs>
+                <marker
+                  id={arrowMarkerId}
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill={borderColor ?? "rgba(13, 116, 206, 1)"} />
+                </marker>
+              </defs>
+            ) : null}
+            <line
+              x1="2"
+              y1="50"
+              x2="98"
+              y2="50"
+              stroke={borderColor ?? "rgba(13, 116, 206, 1)"}
+              strokeWidth={Math.max(1, borderWidth)}
+              markerEnd={isArrowShape ? `url(#${arrowMarkerId})` : undefined}
+            />
+          </svg>
+        ) : isTableShape ? (
+          <div
+            className="h-full w-full bg-white"
+            onPointerDown={(event) => {
+              if (!isInteractive) {
+                return;
+              }
+              event.stopPropagation();
+              selectShape(shapeId);
+            }}
+            onDoubleClick={(event) => {
+              if (!isInteractive) {
+                return;
+              }
+              event.stopPropagation();
+              setEditingShape(shapeId);
+            }}
+          >
+            <table className="h-full w-full table-fixed border-collapse">
+              <tbody>
+                {tableModel.rows.map((row, rowIndex) => (
+                  <tr key={row.id}>
+                    {row.cells.map((cell, cellIndex) => (
+                      <td
+                        key={cell.id}
+                        className="border border-slate-300 align-top text-[calc(var(--slide-unit)*14)] text-slate-700"
+                      >
+                        {isInteractive && isEditing ? (
+                          <textarea
+                            value={cell.text}
+                            className="h-full min-h-[calc(var(--slide-unit)*26)] w-full resize-none border-none bg-transparent px-2 py-1 text-[calc(var(--slide-unit)*14)] text-slate-700 outline-none"
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onChange={(event) =>
+                              updateTableCell(shapeId, rowIndex, cellIndex, event.currentTarget.value)
+                            }
+                          />
+                        ) : (
+                          <div className="min-h-[calc(var(--slide-unit)*26)] px-2 py-1">{cell.text || "\u00A0"}</div>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : hasRichTextContent ? (
           <div
             ref={editableRef}
             className="h-full w-full"
@@ -696,9 +866,13 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
                 return;
               }
               event.stopPropagation();
-              if (!isEditing) {
-                setEditingShape(shapeId);
+            }}
+            onDoubleClick={(event) => {
+              if (!isInteractive) {
+                return;
               }
+              event.stopPropagation();
+              setEditingShape(shapeId);
             }}
             onInput={() => {
               if (!isInteractive) {
@@ -749,7 +923,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         ) : null}
       </div>
 
-      {isSelected && hasContent ? (
+      {isSelected && hasRichTextContent ? (
         <TextFormatToolbar
           anchor={toolbarAnchor}
           textStyle={textStyle}
@@ -769,6 +943,46 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
             });
           }}
         />
+      ) : null}
+
+      {isSelected && isTableShape ? (
+        <div
+          className="absolute z-40 -translate-x-1/2 -translate-y-full"
+          style={{ left: "50%", top: -12 }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-center gap-1 rounded-2xl border border-slate-300 bg-white px-2 py-1 shadow-[0_4px_18px_rgba(15,23,42,0.12)]">
+            <button
+              type="button"
+              className="rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+              onClick={() => addTableRow(shapeId)}
+            >
+              + 行
+            </button>
+            <button
+              type="button"
+              className="rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+              onClick={() => removeTableRow(shapeId)}
+            >
+              - 行
+            </button>
+            <div className="h-4 w-px bg-slate-200" />
+            <button
+              type="button"
+              className="rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+              onClick={() => addTableColumn(shapeId)}
+            >
+              + 列
+            </button>
+            <button
+              type="button"
+              className="rounded-md px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+              onClick={() => removeTableColumn(shapeId)}
+            >
+              - 列
+            </button>
+          </div>
+        </div>
       ) : null}
 
       {isSelected ? (
