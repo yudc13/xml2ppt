@@ -792,6 +792,19 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       return;
     }
 
+    const viewportElement = viewportRef.current;
+    const resizeObserver =
+      viewportElement && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+            const element = viewportRef.current;
+            setViewportRect(element ? element.getBoundingClientRect() : null);
+          })
+        : null;
+
+    if (viewportElement && resizeObserver) {
+      resizeObserver.observe(viewportElement);
+    }
+
     const syncViewportRect = () => {
       const element = viewportRef.current;
       setViewportRect(element ? element.getBoundingClientRect() : null);
@@ -801,6 +814,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     window.addEventListener("resize", syncViewportRect);
     window.addEventListener("scroll", syncViewportRect, true);
     return () => {
+      resizeObserver?.disconnect();
       window.removeEventListener("resize", syncViewportRect);
       window.removeEventListener("scroll", syncViewportRect, true);
     };
