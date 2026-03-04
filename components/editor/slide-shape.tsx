@@ -19,6 +19,7 @@ const TOOLBAR_GAP = 12;
 const HANDLE_EDGE_THRESHOLD = 40;
 const SLIDE_BASE_WIDTH = 960;
 const SLIDE_BASE_HEIGHT = 540;
+const CONTROL_OVERLAY_Z_INDEX = 10_000;
 
 const FONT_OPTIONS = ["Montserrat", "Open Sans", "Noto Sans SC"] as const;
 const COLOR_OPTIONS = [
@@ -651,6 +652,30 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       }),
     [shape.attributes.topLeftX, shape.attributes.topLeftY, shape.attributes.width, viewportRect],
   );
+  const controlOverlayStyle = useMemo<CSSProperties | null>(() => {
+    if (!viewportRect) {
+      return null;
+    }
+
+    const scaleX = viewportRect.width / SLIDE_BASE_WIDTH;
+    const scaleY = viewportRect.height / SLIDE_BASE_HEIGHT;
+
+    return {
+      position: "fixed",
+      left: viewportRect.left + shape.attributes.topLeftX * scaleX,
+      top: viewportRect.top + shape.attributes.topLeftY * scaleY,
+      width: shape.attributes.width * scaleX,
+      height: shape.attributes.height * scaleY,
+      zIndex: CONTROL_OVERLAY_Z_INDEX,
+    };
+  }, [
+    shape.attributes.height,
+    shape.attributes.topLeftX,
+    shape.attributes.topLeftY,
+    shape.attributes.width,
+    viewportRect,
+  ]);
+  const shapeZIndex = "zIndex" in shape ? shape.zIndex : undefined;
 
   useEffect(() => {
     if (!viewportRef) {
@@ -884,19 +909,20 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   };
 
   return (
-    <div
-      ref={shapeRef}
-      className="absolute overflow-visible"
-      style={{
-        left: toPercent(shape.attributes.topLeftX, 960),
-        top: toPercent(shape.attributes.topLeftY, 540),
-        width: toPercent(shape.attributes.width, 960),
-        height: toPercent(shape.attributes.height, 540),
-        zIndex: "zIndex" in shape ? shape.zIndex : undefined,
-        cursor: isDraggableTextShape ? "move" : undefined,
-      }}
-      onPointerDown={isInteractive ? beginDrag : undefined}
-    >
+    <>
+      <div
+        ref={shapeRef}
+        className="absolute overflow-visible"
+        style={{
+          left: toPercent(shape.attributes.topLeftX, 960),
+          top: toPercent(shape.attributes.topLeftY, 540),
+          width: toPercent(shape.attributes.width, 960),
+          height: toPercent(shape.attributes.height, 540),
+          zIndex: shapeZIndex,
+          cursor: isDraggableTextShape ? "move" : undefined,
+        }}
+        onPointerDown={isInteractive ? beginDrag : undefined}
+      >
       <div
         className="h-full w-full overflow-hidden"
         style={{
@@ -1099,99 +1125,104 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         />
       ) : null}
 
-      {isSelected ? (
-        <div
-          className="pointer-events-none absolute inset-0 overflow-visible"
-          style={{
-            transform: `rotate(${currentRotation}deg)`,
-            transformOrigin: "center center",
-          }}
-        >
-          <div
-            className="pointer-events-none absolute w-px bg-sky-500/70"
-            style={rotateHandleLineStyle}
-          />
-          <div
-            className="pointer-events-auto absolute"
-            style={{
-              ...rotateHandleStyle,
-              width: HANDLE_HIT_SIZE,
-              height: HANDLE_HIT_SIZE,
-            }}
-            onPointerDown={beginRotate}
-          >
+        {isSelected && isEditing && hasRichTextContent ? (
+          <>
             <div
-              className="absolute rounded-full border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
-              style={{
-                left: "50%",
-                top: "50%",
-                width: RESIZE_HANDLE_SIZE,
-                height: RESIZE_HANDLE_SIZE,
-                transform: "translate(-50%, -50%)",
-                cursor: "grab",
-              }}
+              className="absolute z-20"
+              style={{ left: 0, top: -TEXT_DRAG_EDGE_SIZE / 2, width: "100%", height: TEXT_DRAG_EDGE_SIZE, cursor: "move" }}
+              onPointerDown={beginDrag}
             />
-          </div>
-          {rotationIndicator ? (
             <div
-              className="pointer-events-none absolute z-40 -translate-x-1/2 rounded-md bg-slate-900/88 px-2 py-1 text-[10px] font-medium text-white"
-              style={{
-                left: rotationIndicator.left,
-                top: rotationIndicator.top,
-              }}
-            >
-              {Math.round(rotationIndicator.angle)}°
-            </div>
-          ) : null}
-          <div
-            className="pointer-events-auto absolute"
-            style={{
-              right: -(HANDLE_HIT_SIZE / 2),
-              bottom: -(HANDLE_HIT_SIZE / 2),
-              width: HANDLE_HIT_SIZE,
-              height: HANDLE_HIT_SIZE,
-            }}
-            onPointerDown={beginResize}
-          >
-            <div
-              className="absolute rounded-sm border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
-              style={{
-                right: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
-                bottom: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
-                width: RESIZE_HANDLE_SIZE,
-                height: RESIZE_HANDLE_SIZE,
-                cursor: "nwse-resize",
-              }}
+              className="absolute z-20"
+              style={{ right: -TEXT_DRAG_EDGE_SIZE / 2, top: 0, width: TEXT_DRAG_EDGE_SIZE, height: "100%", cursor: "move" }}
+              onPointerDown={beginDrag}
             />
-          </div>
-        </div>
-      ) : null}
-
-      {isSelected && isEditing && hasRichTextContent ? (
-        <>
-          <div
-            className="absolute z-20"
-            style={{ left: 0, top: -TEXT_DRAG_EDGE_SIZE / 2, width: "100%", height: TEXT_DRAG_EDGE_SIZE, cursor: "move" }}
-            onPointerDown={beginDrag}
-          />
-          <div
-            className="absolute z-20"
-            style={{ right: -TEXT_DRAG_EDGE_SIZE / 2, top: 0, width: TEXT_DRAG_EDGE_SIZE, height: "100%", cursor: "move" }}
-            onPointerDown={beginDrag}
-          />
-          <div
-            className="absolute z-20"
-            style={{ left: 0, bottom: -TEXT_DRAG_EDGE_SIZE / 2, width: "100%", height: TEXT_DRAG_EDGE_SIZE, cursor: "move" }}
-            onPointerDown={beginDrag}
-          />
-          <div
-            className="absolute z-20"
-            style={{ left: -TEXT_DRAG_EDGE_SIZE / 2, top: 0, width: TEXT_DRAG_EDGE_SIZE, height: "100%", cursor: "move" }}
-            onPointerDown={beginDrag}
-          />
-        </>
-      ) : null}
-    </div>
+            <div
+              className="absolute z-20"
+              style={{ left: 0, bottom: -TEXT_DRAG_EDGE_SIZE / 2, width: "100%", height: TEXT_DRAG_EDGE_SIZE, cursor: "move" }}
+              onPointerDown={beginDrag}
+            />
+            <div
+              className="absolute z-20"
+              style={{ left: -TEXT_DRAG_EDGE_SIZE / 2, top: 0, width: TEXT_DRAG_EDGE_SIZE, height: "100%", cursor: "move" }}
+              onPointerDown={beginDrag}
+            />
+          </>
+        ) : null}
+      </div>
+      {isSelected && controlOverlayStyle && typeof document !== "undefined"
+        ? createPortal(
+            <div className="pointer-events-none absolute overflow-visible" style={controlOverlayStyle}>
+              <div
+                className="pointer-events-none absolute inset-0 overflow-visible"
+                style={{
+                  transform: `rotate(${currentRotation}deg)`,
+                  transformOrigin: "center center",
+                }}
+              >
+                <div
+                  className="pointer-events-none absolute w-px bg-sky-500/70"
+                  style={rotateHandleLineStyle}
+                />
+                <div
+                  className="pointer-events-auto absolute"
+                  style={{
+                    ...rotateHandleStyle,
+                    width: HANDLE_HIT_SIZE,
+                    height: HANDLE_HIT_SIZE,
+                  }}
+                  onPointerDown={beginRotate}
+                >
+                  <div
+                    className="absolute rounded-full border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
+                    style={{
+                      left: "50%",
+                      top: "50%",
+                      width: RESIZE_HANDLE_SIZE,
+                      height: RESIZE_HANDLE_SIZE,
+                      transform: "translate(-50%, -50%)",
+                      cursor: "grab",
+                    }}
+                  />
+                </div>
+                {rotationIndicator ? (
+                  <div
+                    className="pointer-events-none absolute z-40 -translate-x-1/2 rounded-md bg-slate-900/88 px-2 py-1 text-[10px] font-medium text-white"
+                    style={{
+                      left: rotationIndicator.left,
+                      top: rotationIndicator.top,
+                    }}
+                  >
+                    {Math.round(rotationIndicator.angle)}°
+                  </div>
+                ) : null}
+                <div
+                  className="pointer-events-auto absolute"
+                  style={{
+                    right: -(HANDLE_HIT_SIZE / 2),
+                    bottom: -(HANDLE_HIT_SIZE / 2),
+                    width: HANDLE_HIT_SIZE,
+                    height: HANDLE_HIT_SIZE,
+                  }}
+                  onPointerDown={beginResize}
+                >
+                  <div
+                    className="absolute rounded-sm border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
+                    style={{
+                      right: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
+                      bottom: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
+                      width: RESIZE_HANDLE_SIZE,
+                      height: RESIZE_HANDLE_SIZE,
+                      cursor: "nwse-resize",
+                    }}
+                  />
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
@@ -1217,7 +1248,7 @@ function TextFormatToolbar({
   }
 
   return createPortal(
-    <div style={portalStyle} onPointerDown={(event) => event.stopPropagation()}>
+    <div data-shape-toolbar="true" style={portalStyle} onPointerDown={(event) => event.stopPropagation()}>
       <div
         className={`flex items-center rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "gap-1 px-1.5 py-1" : "min-w-max gap-2 px-2 py-1.5"}`}
       >
@@ -1358,7 +1389,7 @@ function TableToolbar({
   }
 
   return createPortal(
-    <div style={portalStyle} onPointerDown={(event) => event.stopPropagation()}>
+    <div data-shape-toolbar="true" style={portalStyle} onPointerDown={(event) => event.stopPropagation()}>
       <div
         className={`flex items-center gap-1 rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "px-1.5 py-1" : "px-2 py-1"}`}
       >

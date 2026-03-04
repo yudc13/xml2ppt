@@ -44,8 +44,14 @@ export function SlideViewport({ slideIndex = DEFAULT_SLIDE_INDEX }: { slideIndex
     const onWindowPointerDown = (event: PointerEvent) => {
       const viewportElement = viewportRef.current;
       const targetNode = event.target as Node | null;
+      const targetElement =
+        targetNode instanceof Element ? targetNode : targetNode?.parentElement ?? null;
 
       if (!viewportElement || !targetNode) {
+        return;
+      }
+
+      if (targetElement?.closest("[data-shape-toolbar='true']")) {
         return;
       }
 
