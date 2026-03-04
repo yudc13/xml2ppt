@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowUpToLine,
@@ -46,12 +46,71 @@ const DEFAULT_ZOOM = 65;
 const MIN_ZOOM = 25;
 const MAX_ZOOM = 200;
 const ZOOM_STEP = 5;
+const DEFAULT_SLIDE_XML =
+  '<slide id="{SLIDE_ID}"><style><fill><fillColor color="rgba(252, 252, 252, 1)"/></fill></style><data><shape id="{SHAPE_ID}" type="rect" width="960" height="540" topLeftX="0" topLeftY="0" rotation="0"><fill><fillColor color="rgba(252, 252, 252, 1)"/></fill></shape></data><note id="{NOTE_ID}"><content><p></p></content></note></slide>';
 
-const SLIDE_NUMBERS = mockSlides.map((_, index) => index + 1);
+function createId(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createBlankSlideXml(): string {
+  return DEFAULT_SLIDE_XML
+    .replace("{SLIDE_ID}", createId("slide"))
+    .replace("{SHAPE_ID}", createId("shape-bg"))
+    .replace("{NOTE_ID}", createId("note"));
+}
 
 export default function Home() {
+  const buildSlideDocumentModel = useSlideEditorStore((state) => state.buildSlideDocumentModel);
+  const [slides, setSlides] = useState<string[]>(() => [...mockSlides]);
   const [activeSlideIndex, setActiveSlideIndex] = useState(INITIAL_ACTIVE_SLIDE_INDEX);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const slideNumbers = useMemo(() => slides.map((_, index) => index + 1), [slides]);
+  const currentSlideXml = slides[activeSlideIndex] ?? slides[INITIAL_ACTIVE_SLIDE_INDEX];
+
+  const persistActiveSlide = () => {
+    const model = buildSlideDocumentModel();
+    if (!model) {
+      return;
+    }
+
+    const xml = serializeSlideDocument(model);
+    setSlides((prev) => {
+      if (activeSlideIndex < 0 || activeSlideIndex >= prev.length) {
+        return prev;
+      }
+
+      if (prev[activeSlideIndex] === xml) {
+        return prev;
+      }
+
+      const nextSlides = [...prev];
+      nextSlides[activeSlideIndex] = xml;
+      return nextSlides;
+    });
+  };
+
+  const handleSelectSlide = (slideNumber: number) => {
+    const nextIndex = slideNumber - 1;
+    if (nextIndex === activeSlideIndex) {
+      return;
+    }
+
+    persistActiveSlide();
+    setActiveSlideIndex(nextIndex);
+  };
+
+  const handleCreateSlide = () => {
+    persistActiveSlide();
+
+    const nextIndex = slides.length;
+    setSlides((prev) => [...prev, createBlankSlideXml()]);
+    setActiveSlideIndex(nextIndex);
+  };
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#f2f4f7] font-sans text-slate-900">
@@ -60,9 +119,11 @@ export default function Home() {
       <div className="flex flex-1 overflow-hidden">
         <SidebarProvider defaultOpen>
           <Sidebar
-            slides={SLIDE_NUMBERS}
+            slides={slideNumbers}
+            slideXmlList={slides}
             activeSlide={activeSlideIndex + 1}
-            onSlideSelect={(slideNumber) => setActiveSlideIndex(slideNumber - 1)}
+            onSlideSelect={handleSelectSlide}
+            onCreateSlide={handleCreateSlide}
           />
 
           <SidebarInset className="flex flex-1 flex-col overflow-auto bg-[#f8fafc]/50 p-8">
@@ -71,7 +132,7 @@ export default function Home() {
               <Toolbar slideIndex={activeSlideIndex} zoom={zoom} onZoomChange={setZoom} />
             </div>
             <div className="flex flex-1 items-center justify-center">
-              <SlideViewport slideIndex={activeSlideIndex} zoom={zoom} />
+              <SlideViewport slideIndex={activeSlideIndex} slideXml={currentSlideXml} zoom={zoom} />
             </div>
           </SidebarInset>
         </SidebarProvider>

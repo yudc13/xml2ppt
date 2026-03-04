@@ -13,20 +13,23 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
-import { slides as mockSlides } from "@/mock/slides";
 import { Plus } from "lucide-react";
 import { useMemo, useSyncExternalStore } from "react";
 
 interface SidebarProps {
   slides: number[];
+  slideXmlList: string[];
   activeSlide?: number;
   onSlideSelect?: (slideNumber: number) => void;
+  onCreateSlide?: () => void;
 }
 
 export function Sidebar({
   slides,
+  slideXmlList,
   activeSlide = 1,
   onSlideSelect,
+  onCreateSlide,
 }: SidebarProps) {
   return (
     <UiSidebar
@@ -38,6 +41,7 @@ export function Sidebar({
           <SidebarTrigger className="h-7 w-7 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100/80" />
           <Button
             variant="outline"
+            onClick={onCreateSlide}
             className="h-8 flex-1 justify-center gap-1.5 rounded-xl border-slate-200/90 bg-white/95 px-2 py-1.5 text-xs font-medium text-slate-700 shadow-[0_1px_6px_rgba(15,23,42,0.05)] transition-colors duration-200 hover:bg-slate-100/80 focus-visible:ring-2 focus-visible:ring-sky-200 group-data-[collapsible=icon]:hidden"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -54,6 +58,7 @@ export function Sidebar({
                 key={slide}
                 number={slide}
                 slideIndex={index}
+                slideXml={slideXmlList[index]}
                 isActive={slide === activeSlide}
                 onSelect={onSlideSelect}
               />
@@ -95,11 +100,13 @@ function CollapsedSlideButton({
 function ExpandedSlideThumbnail({
   number,
   slideIndex,
+  slideXml,
   isActive,
   onSelect,
 }: {
   number: number;
   slideIndex: number;
+  slideXml?: string;
   isActive: boolean;
   onSelect?: (slideNumber: number) => void;
 }) {
@@ -110,7 +117,6 @@ function ExpandedSlideThumbnail({
   );
   const currentSlideIndex = useSlideEditorStore((state) => state.currentSlideIndex);
   const storedShapes = useSlideEditorStore((state) => state.shapes);
-  const slideXml = mockSlides[slideIndex];
 
   const parsedShapes = useMemo(() => {
     if (!slideXml) {
@@ -169,11 +175,13 @@ function ExpandedSlideThumbnail({
 function SlideThumbnail({
   number,
   slideIndex,
+  slideXml,
   isActive,
   onSelect,
 }: {
   number: number;
   slideIndex: number;
+  slideXml?: string;
   isActive: boolean;
   onSelect?: (slideNumber: number) => void;
 }) {
@@ -183,6 +191,7 @@ function SlideThumbnail({
       <ExpandedSlideThumbnail
         number={number}
         slideIndex={slideIndex}
+        slideXml={slideXml}
         isActive={isActive}
         onSelect={onSelect}
       />

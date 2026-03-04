@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { SlideShape } from "@/components/editor/slide-shape";
 import { useSlideEditorStore } from "@/features/slide-editor/store";
 import { parseSlideXml } from "@/lib/slide-xml/parser";
-import { slides } from "@/mock/slides";
 
 const DEFAULT_SLIDE_INDEX = 0;
 const DEFAULT_ZOOM = 65;
@@ -13,19 +12,16 @@ const MIN_ZOOM = 25;
 const MAX_ZOOM = 200;
 const BASE_VIEWPORT_WIDTH = 1200;
 
-function getSlideXmlByIndex(index: number): string {
-  return slides[index] ?? slides[DEFAULT_SLIDE_INDEX];
-}
-
 export function SlideViewport({
   slideIndex = DEFAULT_SLIDE_INDEX,
+  slideXml,
   zoom = DEFAULT_ZOOM,
 }: {
   slideIndex?: number;
+  slideXml?: string;
   zoom?: number;
 }) {
-  const xml = getSlideXmlByIndex(slideIndex);
-  const model = useMemo(() => parseSlideXml(xml), [xml]);
+  const model = useMemo(() => parseSlideXml(slideXml ?? ""), [slideXml]);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const isHydrated = useSyncExternalStore(
     () => () => {},
