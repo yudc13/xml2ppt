@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { SlideShape } from "@/components/editor/slide-shape";
+import { SlideShape } from "@/features/deck-editor/components/slide-shape";
 import { useSlideEditorStore } from "@/features/slide-editor/store";
 import { parseSlideXml } from "@/lib/slide-xml/parser";
 import { ScrollArea } from "@/components/ui/scroll-area";

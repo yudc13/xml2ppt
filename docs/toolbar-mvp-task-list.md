@@ -77,10 +77,10 @@
 - [ ] [`app/api/slides/save/route.ts`](/Users/yudachao/Projects/ydc/ppt/app/api/slides/save/route.ts)：确认保存接口无需额外字段变更（保持 `{ slideIndex, xml }`）
 
 ### components/
-- [ ] [`components/editor/slide-viewport.tsx`](/Users/yudachao/Projects/ydc/ppt/components/editor/slide-viewport.tsx)：保持渲染入口按 `shapes` 统一分发，确认新增元素可被遍历渲染
-- [x] [`components/editor/slide-shape.tsx`](/Users/yudachao/Projects/ydc/ppt/components/editor/slide-shape.tsx)：扩展渲染分支，支持 `矩形/圆/直线/单向箭头/表格`
-- [x] [`components/editor/slide-shape.tsx`](/Users/yudachao/Projects/ydc/ppt/components/editor/slide-shape.tsx)：补齐文本 5 级默认样式渲染与编辑态行为
-- [x] [`components/editor/slide-shape.tsx`](/Users/yudachao/Projects/ydc/ppt/components/editor/slide-shape.tsx)：实现表格单元格编辑与基础行列增删交互
+- [ ] [`components/editor/slide-viewport.tsx`](/Users/yudachao/Projects/ydc/ppt/features/deck-editor/components/slide-viewport.tsx)：保持渲染入口按 `shapes` 统一分发，确认新增元素可被遍历渲染
+- [x] [`components/editor/slide-shape.tsx`](/Users/yudachao/Projects/ydc/ppt/features/deck-editor/components/slide-shape.tsx)：扩展渲染分支，支持 `矩形/圆/直线/单向箭头/表格`
+- [x] [`components/editor/slide-shape.tsx`](/Users/yudachao/Projects/ydc/ppt/features/deck-editor/components/slide-shape.tsx)：补齐文本 5 级默认样式渲染与编辑态行为
+- [x] [`components/editor/slide-shape.tsx`](/Users/yudachao/Projects/ydc/ppt/features/deck-editor/components/slide-shape.tsx)：实现表格单元格编辑与基础行列增删交互
 - [ ] （建议新增）`components/editor/toolbar.tsx`：从 `app/page.tsx` 抽离 Toolbar 逻辑，降低页面复杂度（可选）
 
 ### features/

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Montserrat, Open_Sans } from "next/font/google";
+import { QueryProvider } from "@/features/shared/providers/query-provider";
 import "./globals.css";
 
 const montserrat = Montserrat({
@@ -23,9 +24,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${montserrat.variable} ${openSans.variable} antialiased`}>
-        {children}
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${montserrat.variable} ${openSans.variable} antialiased`} suppressHydrationWarning>
+        <QueryProvider>{children}</QueryProvider>
       </body>
     </html>
   );
