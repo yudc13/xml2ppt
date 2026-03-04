@@ -1,11 +1,20 @@
 import { z } from "zod";
 
 import { apiError, apiOk } from "@/lib/api/response";
-import { createDeck } from "@/lib/db/repository";
+import { createDeck, listDecks } from "@/lib/db/repository";
 
 const createDeckSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
 });
+
+export async function GET() {
+  try {
+    const decks = await listDecks();
+    return apiOk({ decks });
+  } catch {
+    return apiError("Failed to load decks", "LOAD_DECKS_FAILED", 500);
+  }
+}
 
 export async function POST(request: Request) {
   let payload: unknown;

@@ -1,7 +1,10 @@
 "use client";
 
+import Link from "next/link";
+import Image from "next/image";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
+  ArrowLeft,
   Check,
   ChevronDown,
   Download,
@@ -15,9 +18,11 @@ import {
 type HeaderProps = {
   title: string;
   onTitleSave?: (nextTitle: string) => Promise<boolean>;
+  backHref?: string;
+  showLogo?: boolean;
 };
 
-export function Header({ title, onTitleSave }: HeaderProps) {
+export function Header({ title, onTitleSave, backHref, showLogo = true }: HeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
   const [isSavingTitle, setIsSavingTitle] = useState(false);
@@ -102,11 +107,29 @@ export function Header({ title, onTitleSave }: HeaderProps) {
 
   return (
     <header className="flex h-20 items-center justify-between border-b border-slate-200 bg-white px-6">
-      <div className="flex items-center gap-4">
-        <div className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 bg-[#fff7f2]">
-          <span className="h-6 w-6 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 shadow-sm" />
-        </div>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center">
+        {backHref ? (
+          <Link
+            href={backHref}
+            aria-label="返回列表"
+            className="group grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200/90 bg-white text-slate-500 shadow-[0_1px_6px_rgba(15,23,42,0.05)] transition-all duration-200 hover:-translate-x-0.5 hover:bg-slate-100/80 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+          >
+            <ArrowLeft className="h-4 w-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
+          </Link>
+        ) : null}
+        {showLogo ? (
+          <div className={`${backHref ? "ml-1.5" : ""} grid h-10 w-10 place-items-center rounded-xl bg-transparent`}>
+            <Image
+              src="/logo.svg"
+              alt="PPT Logo"
+              width={24}
+              height={24}
+              className="h-6 w-6 opacity-95 transition-opacity duration-200 hover:opacity-100"
+              priority
+            />
+          </div>
+        ) : null}
+        <div className={`${showLogo ? "ml-3.5" : backHref ? "ml-2.5" : ""} flex items-center gap-2`}>
           {isEditingTitle ? (
             <input
               ref={inputRef}
@@ -177,13 +200,6 @@ export function Header({ title, onTitleSave }: HeaderProps) {
           aria-label="全屏"
         >
           <Expand className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100/80 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
-          aria-label="关闭"
-        >
-          <X className="h-4 w-4" />
         </button>
       </div>
     </header>

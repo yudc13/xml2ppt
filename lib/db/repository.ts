@@ -17,6 +17,11 @@ export async function createDeck(title: string): Promise<Deck> {
   return created;
 }
 
+export async function listDecks(): Promise<Deck[]> {
+  const db = getDb();
+  return db.select().from(decks).orderBy(desc(decks.updatedAt));
+}
+
 export async function getDeckById(deckId: string): Promise<Deck | null> {
   const db = getDb();
   const [deck] = await db.select().from(decks).where(eq(decks.id, deckId)).limit(1);
