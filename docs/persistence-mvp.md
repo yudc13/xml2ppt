@@ -10,6 +10,7 @@
 - 加载文稿全部幻灯片
 - 切换页/新建前自动保存
 - 手动保存
+- 历史版本列表、版本预览、回滚
 
 ## 环境变量
 复制 `.env.example` 到 `.env.local`，并填写：
@@ -56,7 +57,19 @@ bun run api:smoke
 - 出参：`{ ok: true, slide }`
 
 4. `PATCH /api/slides/:slideId`
-- 入参：`{ version: number, xmlContent: string }`
+- 入参：`{ version: number, xmlContent: string, reason?: "manual_save" | "autosave" }`
+- 成功：`{ ok: true, slide }`
+- 冲突：`409` + `{ ok: false, code: "SLIDE_VERSION_CONFLICT" }`
+
+5. `GET /api/slides/:slideId/revisions`
+- 入参：`?limit=100`（可选）
+- 出参：`{ ok: true, revisions }`
+
+6. `GET /api/slides/:slideId/revisions/:version`
+- 出参：`{ ok: true, revision }`
+
+7. `POST /api/slides/:slideId/rollback`
+- 入参：`{ targetVersion: number, currentVersion: number }`
 - 成功：`{ ok: true, slide }`
 - 冲突：`409` + `{ ok: false, code: "SLIDE_VERSION_CONFLICT" }`
 
@@ -74,9 +87,11 @@ bun run api:smoke
 ## 数据表
 - `deck(id, title, created_at, updated_at)`
 - `slide(id, deck_id, position, xml_content, version, created_at, updated_at)`
+- `slide_revision(id, slide_id, version, xml_content, created_at, created_by, reason)`
 - 约束：`unique(deck_id, position)`
+- 约束：`unique(slide_id, version)`
 
 ## 已知限制
 - 无用户系统，数据按“单实例”使用场景组织
 - 未实现协同编辑
-- 未实现版本历史 UI（仅保留 version 乐观锁）
+- 未实现版本差异（diff）展示，仅支持快照预览

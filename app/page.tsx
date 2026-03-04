@@ -9,8 +9,10 @@ import {
   ChevronDown,
   Eye,
   EyeOff,
+  History,
   Loader2,
   Palette,
+  RotateCcw,
   Save,
   Shapes,
   Sparkles,
@@ -39,6 +41,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 
 const INITIAL_ACTIVE_SLIDE_INDEX = 0;
 const DEFAULT_ZOOM = 65;
@@ -54,6 +65,16 @@ type PersistedSlide = {
   xmlContent: string;
   version: number;
   updatedAt: string;
+};
+
+type SlideRevision = {
+  id: number;
+  slideId: string;
+  version: number;
+  xmlContent: string;
+  createdAt: string;
+  createdBy: string | null;
+  reason: string | null;
 };
 
 type SaveStatus = "idle" | "success" | "error" | "conflict";
@@ -92,6 +113,7 @@ export default function Home() {
   const buildSlideDocumentModel = useSlideEditorStore((state) => state.buildSlideDocumentModel);
   const currentSlideIndexInStore = useSlideEditorStore((state) => state.currentSlideIndex);
   const storeShapes = useSlideEditorStore((state) => state.shapes);
+  const setPreviewMode = useSlideEditorStore((state) => state.setPreviewMode);
 
   const [deckId, setDeckId] = useState<string | null>(null);
   const [slides, setSlides] = useState<PersistedSlide[]>([]);
@@ -102,10 +124,17 @@ export default function Home() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [revisions, setRevisions] = useState<SlideRevision[]>([]);
+  const [isLoadingRevisions, setIsLoadingRevisions] = useState(false);
+  const [revisionError, setRevisionError] = useState<string | null>(null);
+  const [previewRevisionVersion, setPreviewRevisionVersion] = useState<number | null>(null);
+  const [previewRevisionXml, setPreviewRevisionXml] = useState<string | null>(null);
+  const [isRollingBack, setIsRollingBack] = useState(false);
   const saveStatusTimeoutRef = useRef<number | null>(null);
 
   const activeSlide = slides[activeSlideIndex] ?? null;
-  const currentSlideXml = activeSlide?.xmlContent;
+  const currentSlideXml = previewRevisionXml ?? activeSlide?.xmlContent;
   const slideNumbers = useMemo(() => slides.map((_, index) => index + 1), [slides]);
   const shapeMutationSignal = useMemo(
     () =>
@@ -198,6 +227,17 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    setPreviewRevisionVersion(null);
+    setPreviewRevisionXml(null);
+    setRevisions([]);
+    setRevisionError(null);
+  }, [activeSlide?.id]);
+
+  useEffect(() => {
+    setPreviewMode(previewRevisionVersion !== null);
+  }, [previewRevisionVersion, setPreviewMode]);
+
   const isDirty = useMemo(() => {
     void shapeMutationSignal;
 
@@ -234,6 +274,10 @@ export default function Home() {
       return !isSaving;
     }
 
+    if (previewRevisionVersion !== null) {
+      return true;
+    }
+
     const model = buildSlideDocumentModel();
     if (!model) {
       return true;
@@ -262,6 +306,7 @@ export default function Home() {
         body: JSON.stringify({
           version: activeSlide.version,
           xmlContent,
+          reason: showStatus ? "manual_save" : "autosave",
         }),
       });
 
@@ -294,6 +339,103 @@ export default function Home() {
     }
   };
 
+  const loadRevisions = async () => {
+    if (!activeSlide) {
+      return;
+    }
+
+    setIsLoadingRevisions(true);
+    setRevisionError(null);
+    try {
+      const response = await requestJson<{ ok: true; revisions: SlideRevision[] }>(
+        `/api/slides/${activeSlide.id}/revisions?limit=100`,
+      );
+      setRevisions(response.revisions);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "加载历史版本失败";
+      setRevisionError(message);
+    } finally {
+      setIsLoadingRevisions(false);
+    }
+  };
+
+  const handleOpenHistory = () => {
+    setIsHistoryOpen(true);
+    void loadRevisions();
+  };
+
+  const handlePreviewRevision = async (version: number) => {
+    if (!activeSlide) {
+      return;
+    }
+
+    if (version === activeSlide.version) {
+      setPreviewRevisionVersion(null);
+      setPreviewRevisionXml(null);
+      return;
+    }
+
+    const persisted = await persistActiveSlide();
+    if (!persisted) {
+      return;
+    }
+
+    try {
+      const response = await requestJson<{ ok: true; revision: SlideRevision }>(
+        `/api/slides/${activeSlide.id}/revisions/${version}`,
+      );
+      setPreviewRevisionVersion(version);
+      setPreviewRevisionXml(response.revision.xmlContent);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "加载历史版本内容失败";
+      setRevisionError(message);
+    }
+  };
+
+  const handleRollbackRevision = async (targetVersion: number) => {
+    if (!activeSlide || isRollingBack) {
+      return;
+    }
+
+    setIsRollingBack(true);
+    try {
+      const result = await requestJson<{ ok: true; slide: PersistedSlide }>(`/api/slides/${activeSlide.id}/rollback`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          targetVersion,
+          currentVersion: activeSlide.version,
+        }),
+      });
+
+      setSlides((prev) =>
+        prev.map((slide) => {
+          if (slide.id !== result.slide.id) {
+            return slide;
+          }
+
+          return result.slide;
+        }),
+      );
+      setPreviewRevisionVersion(null);
+      setPreviewRevisionXml(null);
+      setLastSavedAt(result.slide.updatedAt);
+      setSaveStatus("success");
+      clearSaveStatusLater();
+      await loadRevisions();
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.code === "SLIDE_VERSION_CONFLICT") {
+        setSaveStatus("conflict");
+      } else {
+        setSaveStatus("error");
+      }
+    } finally {
+      setIsRollingBack(false);
+    }
+  };
+
   const handleSelectSlide = (slideNumber: number) => {
     const nextIndex = slideNumber - 1;
     if (nextIndex === activeSlideIndex) {
@@ -306,6 +448,7 @@ export default function Home() {
         return;
       }
 
+      setIsHistoryOpen(false);
       setActiveSlideIndex(nextIndex);
     })();
   };
@@ -332,6 +475,7 @@ export default function Home() {
 
         setSlides((prev) => {
           const nextSlides = [...prev, created.slide];
+          setIsHistoryOpen(false);
           setActiveSlideIndex(nextSlides.length - 1);
           return nextSlides;
         });
@@ -386,10 +530,27 @@ export default function Home() {
                 saveStatus={saveStatus}
                 isDirty={isDirty}
                 lastSavedAt={lastSavedAt}
+                isHistoryOpen={isHistoryOpen}
+                onHistoryOpenChange={setIsHistoryOpen}
+                onOpenHistory={handleOpenHistory}
+                revisions={revisions}
+                isLoadingRevisions={isLoadingRevisions}
+                revisionError={revisionError}
+                previewRevisionVersion={previewRevisionVersion}
+                activeVersion={activeSlide?.version ?? null}
+                onPreviewRevision={handlePreviewRevision}
+                onRollbackRevision={handleRollbackRevision}
+                isRollingBack={isRollingBack}
+                isPreviewingRevision={previewRevisionVersion !== null}
               />
             </div>
             <div className="flex flex-1 items-center justify-center">
-              <SlideViewport slideIndex={activeSlideIndex} slideXml={currentSlideXml} zoom={zoom} />
+              <SlideViewport
+                slideIndex={activeSlideIndex}
+                slideXml={currentSlideXml}
+                zoom={zoom}
+                forceModelRender={previewRevisionVersion !== null}
+              />
             </div>
           </SidebarInset>
         </SidebarProvider>
@@ -418,6 +579,18 @@ function Toolbar({
   saveStatus,
   isDirty,
   lastSavedAt,
+  isHistoryOpen,
+  onHistoryOpenChange,
+  onOpenHistory,
+  revisions,
+  isLoadingRevisions,
+  revisionError,
+  previewRevisionVersion,
+  activeVersion,
+  onPreviewRevision,
+  onRollbackRevision,
+  isRollingBack,
+  isPreviewingRevision,
 }: {
   zoom: number;
   onZoomChange: (nextZoom: number) => void;
@@ -426,6 +599,18 @@ function Toolbar({
   saveStatus: SaveStatus;
   isDirty: boolean;
   lastSavedAt: string | null;
+  isHistoryOpen: boolean;
+  onHistoryOpenChange: (open: boolean) => void;
+  onOpenHistory: () => void;
+  revisions: SlideRevision[];
+  isLoadingRevisions: boolean;
+  revisionError: string | null;
+  previewRevisionVersion: number | null;
+  activeVersion: number | null;
+  onPreviewRevision: (version: number) => void;
+  onRollbackRevision: (version: number) => void;
+  isRollingBack: boolean;
+  isPreviewingRevision: boolean;
 }) {
   const selectedShapeId = useSlideEditorStore((state) => state.selectedShapeId);
   const bringToFront = useSlideEditorStore((state) => state.bringToFront);
@@ -514,6 +699,8 @@ function Toolbar({
       <div className="mb-2 text-center text-xs text-slate-500">
         {saveStatus === "conflict"
           ? "内容已过期，请刷新后重试"
+          : isPreviewingRevision
+            ? `正在预览历史版本 v${previewRevisionVersion}`
           : isDirty
             ? "有未保存修改"
             : lastSavedAt
@@ -569,7 +756,7 @@ function Toolbar({
         <button
           type="button"
           onClick={onSave}
-          disabled={isSaving}
+          disabled={isSaving || isPreviewingRevision}
           className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
         >
           {isSaving ? (
@@ -582,6 +769,14 @@ function Toolbar({
             <Save className="h-4 w-4" />
           )}
           <span className="hidden md:inline">{saveStatusText}</span>
+        </button>
+        <button
+          type="button"
+          onClick={onOpenHistory}
+          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+        >
+          <History className="h-4 w-4" />
+          <span className="hidden md:inline">历史版本</span>
         </button>
         <button
           type="button"
@@ -640,6 +835,77 @@ function Toolbar({
           <ZoomIn className="h-4 w-4" />
         </button>
       </div>
+      <Sheet open={isHistoryOpen} onOpenChange={onHistoryOpenChange}>
+        <SheetContent side="right" className="w-[420px] p-0 sm:max-w-[420px]">
+          <SheetHeader className="border-b border-slate-200 bg-white p-4">
+            <SheetTitle>历史版本</SheetTitle>
+            <SheetDescription>查看版本记录，预览并回滚到指定版本。</SheetDescription>
+          </SheetHeader>
+          <ScrollArea className="flex-1">
+            <div className="space-y-2 p-4">
+              {isLoadingRevisions ? (
+                <div className="text-sm text-slate-500">正在加载版本列表...</div>
+              ) : revisionError ? (
+                <div className="text-sm text-rose-600">{revisionError}</div>
+              ) : revisions.length === 0 ? (
+                <div className="text-sm text-slate-500">暂无历史版本</div>
+              ) : (
+                revisions.map((revision) => {
+                  const isCurrent = revision.version === activeVersion;
+                  const isPreview = revision.version === previewRevisionVersion;
+
+                  return (
+                    <div
+                      key={`${revision.slideId}-${revision.version}`}
+                      className={`rounded-xl border p-3 ${
+                        isPreview ? "border-sky-300 bg-sky-50/60" : "border-slate-200 bg-white"
+                      }`}
+                    >
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-sm font-semibold text-slate-800">v{revision.version}</span>
+                        {isCurrent ? (
+                          <span className="rounded bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">当前</span>
+                        ) : null}
+                      </div>
+                      <div className="mb-3 text-xs text-slate-500">
+                        {new Date(revision.createdAt).toLocaleString()}
+                        {revision.reason ? ` · ${revision.reason}` : ""}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onPreviewRevision(revision.version)}
+                          className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100/70"
+                        >
+                          {isCurrent ? "查看当前" : isPreview ? "退出预览" : "预览"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isCurrent || isRollingBack}
+                          onClick={() => onRollbackRevision(revision.version)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100/70 disabled:cursor-not-allowed disabled:text-slate-400"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          回滚
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </ScrollArea>
+          <SheetFooter className="border-t border-slate-200 bg-white p-4">
+            <button
+              type="button"
+              onClick={() => onHistoryOpenChange(false)}
+              className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100/70"
+            >
+              关闭
+            </button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

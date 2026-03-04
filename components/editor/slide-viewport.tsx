@@ -16,10 +16,12 @@ export function SlideViewport({
   slideIndex = DEFAULT_SLIDE_INDEX,
   slideXml,
   zoom = DEFAULT_ZOOM,
+  forceModelRender = false,
 }: {
   slideIndex?: number;
   slideXml?: string;
   zoom?: number;
+  forceModelRender?: boolean;
 }) {
   const model = useMemo(() => parseSlideXml(slideXml ?? ""), [slideXml]);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -41,7 +43,7 @@ export function SlideViewport({
   );
   const safeZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
   const viewportWidth = (BASE_VIEWPORT_WIDTH * safeZoom) / 100;
-  const shouldUseStoreShapes = isHydrated && currentSlideIndex === slideIndex;
+  const shouldUseStoreShapes = !forceModelRender && isHydrated && currentSlideIndex === slideIndex;
   const interactiveEnabled = shouldUseStoreShapes && !isPreviewMode;
 
   useEffect(() => {

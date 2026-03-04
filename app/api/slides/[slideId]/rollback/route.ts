@@ -1,23 +1,22 @@
 import { z } from "zod";
 
 import { apiError, apiOk } from "@/lib/api/response";
-import { updateSlideContent } from "@/lib/db/repository";
+import { rollbackSlideToRevision } from "@/lib/db/repository";
 
 const paramsSchema = z.object({
   slideId: z.uuid(),
 });
 
-const saveSlideSchema = z.object({
-  version: z.number().int().min(1),
-  xmlContent: z.string().min(1),
-  reason: z.enum(["manual_save", "autosave"]).optional(),
+const rollbackSchema = z.object({
+  targetVersion: z.number().int().min(1),
+  currentVersion: z.number().int().min(1),
 });
 
 type RouteContext = {
   params: Promise<{ slideId: string }>;
 };
 
-export async function PATCH(request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
   const params = await context.params;
   const parsedParams = paramsSchema.safeParse(params);
   if (!parsedParams.success) {
@@ -31,21 +30,20 @@ export async function PATCH(request: Request, context: RouteContext) {
     return apiError("Invalid JSON payload", "INVALID_PAYLOAD", 400);
   }
 
-  const parsedPayload = saveSlideSchema.safeParse(payload);
+  const parsedPayload = rollbackSchema.safeParse(payload);
   if (!parsedPayload.success) {
-    return apiError("Expected payload: { version: number, xmlContent: string }", "INVALID_PAYLOAD", 400);
+    return apiError("Expected payload: { targetVersion: number, currentVersion: number }", "INVALID_PAYLOAD", 400);
   }
 
   try {
-    const result = await updateSlideContent({
+    const result = await rollbackSlideToRevision({
       slideId: parsedParams.data.slideId,
-      version: parsedPayload.data.version,
-      xmlContent: parsedPayload.data.xmlContent,
-      reason: parsedPayload.data.reason,
+      targetVersion: parsedPayload.data.targetVersion,
+      currentVersion: parsedPayload.data.currentVersion,
     });
 
     if (result.status === "not_found") {
-      return apiError("Slide not found", "SLIDE_NOT_FOUND", 404);
+      return apiError("Revision not found", "REVISION_NOT_FOUND", 404);
     }
 
     if (result.status === "conflict") {
@@ -54,6 +52,6 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     return apiOk({ slide: result.slide });
   } catch {
-    return apiError("Failed to save slide", "SAVE_SLIDE_FAILED", 500);
+    return apiError("Failed to rollback slide", "ROLLBACK_FAILED", 500);
   }
 }

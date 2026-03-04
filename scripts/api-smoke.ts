@@ -72,6 +72,27 @@ async function run() {
     throw new Error("smoke failed: persisted xml content mismatch");
   }
 
+  const revisions = await requestJson<{ revisions: Array<{ version: number }> }>(`/api/slides/${slideId}/revisions`);
+  if (revisions.revisions.length < 2) {
+    throw new Error("smoke failed: expected at least two revisions");
+  }
+  console.log(`loaded revisions: ${revisions.revisions.length}`);
+
+  const rolledBack = await requestJson<{ slide: { version: number; xmlContent: string } }>(
+    `/api/slides/${slideId}/rollback`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        targetVersion: 1,
+        currentVersion: loadedSlide.version,
+      }),
+    },
+  );
+  console.log(`rollback new version: ${rolledBack.slide.version}`);
+
   console.log("smoke success");
 }
 

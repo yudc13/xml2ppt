@@ -387,11 +387,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
   historyPast: [],
   historyFuture: [],
   initializeSlide: (slideIndex, model) => {
-    set((state) => {
-      if (state.currentSlideIndex === slideIndex) {
-        return state;
-      }
-
+    set(() => {
       return {
         currentSlideIndex: slideIndex,
         currentSlideMeta: {

@@ -80,3 +80,13 @@
 - 记录环境变量、迁移命令、接口示例
 - 记录已知限制（无认证、单租户）
 - 验收：新同学可按文档快速跑起
+
+## Task 9. 历史版本（新增）
+- 新增 `slide_revision` 表，按 `slide_id + version` 唯一记录每次保存快照
+- 保存成功后同事务写入 revision（`reason`: `manual_save` / `autosave` / `rollback`）
+- 新增历史版本 API：
+- `GET /api/slides/:slideId/revisions`（版本列表）
+- `GET /api/slides/:slideId/revisions/:version`（版本详情）
+- `POST /api/slides/:slideId/rollback`（回滚并生成新版本）
+- 前端新增“历史版本”面板，支持查看列表、预览版本、回滚到指定版本
+- 验收：同一 slide 多次保存后可看到连续版本；回滚后产生新版本且内容正确
