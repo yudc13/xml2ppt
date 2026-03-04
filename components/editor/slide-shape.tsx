@@ -189,6 +189,47 @@ function getBorderStyle(shapeNode: XmlNode): "solid" | "dashed" | "dotted" {
   return "solid";
 }
 
+function getImageSource(shapeNode: XmlNode): string | null {
+  const src = shapeNode["@_src"];
+  return typeof src === "string" && src.length > 0 ? src : null;
+}
+
+function toFiniteNumber(value: unknown, fallback = 0): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function getImageCrop(shapeNode: XmlNode): {
+  type: string;
+  leftOffset: number;
+  rightOffset: number;
+  topOffset: number;
+  bottomOffset: number;
+  presetHandlers: number;
+} {
+  const cropValue = shapeNode.crop;
+  if (!cropValue || typeof cropValue !== "object" || Array.isArray(cropValue)) {
+    return {
+      type: "none",
+      leftOffset: 0,
+      rightOffset: 0,
+      topOffset: 0,
+      bottomOffset: 0,
+      presetHandlers: 0,
+    };
+  }
+
+  const cropNode = cropValue as XmlNode;
+  return {
+    type: typeof cropNode["@_type"] === "string" ? cropNode["@_type"] : "none",
+    leftOffset: toFiniteNumber(cropNode["@_leftOffset"]),
+    rightOffset: toFiniteNumber(cropNode["@_rightOffset"]),
+    topOffset: toFiniteNumber(cropNode["@_topOffset"]),
+    bottomOffset: toFiniteNumber(cropNode["@_bottomOffset"]),
+    presetHandlers: toFiniteNumber(cropNode["@_presetHandlers"]),
+  };
+}
+
 function getShapeText(value: XmlValue | undefined): string {
   if (value === undefined || value === null) {
     return "";
@@ -628,7 +669,23 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const isEllipseShape = shapeType === "ellipse";
   const isLineShape = shapeType === "line";
   const isArrowShape = shapeType === "arrow";
+  const isImageShape = shapeType === "image";
   const isLineLikeShape = isLineShape || isArrowShape;
+  const imageSource = useMemo(() => getImageSource(shape.rawNode), [shape.rawNode]);
+  const imageCrop = useMemo(() => getImageCrop(shape.rawNode), [shape.rawNode]);
+  const imageFrameRadius = useMemo(() => {
+    if (imageCrop.type !== "round-rect") {
+      return undefined;
+    }
+
+    const maxRadius = Math.min(shape.attributes.width, shape.attributes.height) / 2;
+    const radius = Math.min(Math.max(0, imageCrop.presetHandlers), maxRadius);
+    return `calc(var(--slide-unit) * ${radius})`;
+  }, [imageCrop.presetHandlers, imageCrop.type, shape.attributes.height, shape.attributes.width]);
+  const imageOffsetX = imageCrop.leftOffset;
+  const imageOffsetY = imageCrop.topOffset;
+  const imageScaleWidth = imageCrop.leftOffset + imageCrop.rightOffset;
+  const imageScaleHeight = imageCrop.topOffset + imageCrop.bottomOffset;
   const contentHtml =
     "contentHtml" in shape
       ? shape.contentHtml
@@ -727,7 +784,8 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     shape.attributes.width,
     viewportRect,
   ]);
-  const shapeZIndex = "zIndex" in shape ? shape.zIndex : undefined;
+  const shapeZIndex =
+    "zIndex" in shape ? Math.max(0, Number.isFinite(shape.zIndex) ? shape.zIndex : 0) : undefined;
 
   useEffect(() => {
     if (!viewportRef) {
@@ -981,7 +1039,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
           transform: `rotate(${currentRotation}deg)`,
           transformOrigin: "center center",
           background: isLineLikeShape ? undefined : backgroundColor,
-          borderRadius: isEllipseShape ? "9999px" : shape.style.borderRadius,
+          borderRadius: isImageShape ? imageFrameRadius : isEllipseShape ? "9999px" : shape.style.borderRadius,
           border:
             !isLineLikeShape && borderColor && borderWidth > 0
               ? `${borderWidth}px ${borderStyle} ${borderColor}`
@@ -1068,6 +1126,28 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
               </tbody>
             </table>
           </div>
+        ) : isImageShape ? (
+          imageSource ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={imageSource}
+              alt=""
+              draggable={false}
+              className="pointer-events-none absolute max-w-none select-none"
+              style={{
+                left: `calc(var(--slide-unit) * ${-imageOffsetX})`,
+                top: `calc(var(--slide-unit) * ${-imageOffsetY})`,
+                width: `calc(100% + (var(--slide-unit) * ${imageScaleWidth}))`,
+                height: `calc(100% + (var(--slide-unit) * ${imageScaleHeight}))`,
+                objectFit: "cover",
+                borderRadius: imageFrameRadius,
+              }}
+            />
+          ) : (
+            <div className="grid h-full w-full place-items-center bg-slate-100 text-[calc(var(--slide-unit)*12)] text-slate-500">
+              图片缺失
+            </div>
+          )
         ) : hasRichTextContent ? (
           <div
             ref={editableRef}

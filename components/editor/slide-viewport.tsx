@@ -8,12 +8,22 @@ import { parseSlideXml } from "@/lib/slide-xml/parser";
 import { slides } from "@/mock/slides";
 
 const DEFAULT_SLIDE_INDEX = 0;
+const DEFAULT_ZOOM = 65;
+const MIN_ZOOM = 25;
+const MAX_ZOOM = 200;
+const BASE_VIEWPORT_WIDTH = 1200;
 
 function getSlideXmlByIndex(index: number): string {
   return slides[index] ?? slides[DEFAULT_SLIDE_INDEX];
 }
 
-export function SlideViewport({ slideIndex = DEFAULT_SLIDE_INDEX }: { slideIndex?: number }) {
+export function SlideViewport({
+  slideIndex = DEFAULT_SLIDE_INDEX,
+  zoom = DEFAULT_ZOOM,
+}: {
+  slideIndex?: number;
+  zoom?: number;
+}) {
   const xml = getSlideXmlByIndex(slideIndex);
   const model = useMemo(() => parseSlideXml(xml), [xml]);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -33,6 +43,8 @@ export function SlideViewport({ slideIndex = DEFAULT_SLIDE_INDEX }: { slideIndex
     () => [...storedShapes].sort((a, b) => a.zIndex - b.zIndex),
     [storedShapes],
   );
+  const safeZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+  const viewportWidth = (BASE_VIEWPORT_WIDTH * safeZoom) / 100;
   const shouldUseStoreShapes = isHydrated && currentSlideIndex === slideIndex;
   const interactiveEnabled = shouldUseStoreShapes && !isPreviewMode;
 
@@ -44,14 +56,18 @@ export function SlideViewport({ slideIndex = DEFAULT_SLIDE_INDEX }: { slideIndex
     const onWindowPointerDown = (event: PointerEvent) => {
       const viewportElement = viewportRef.current;
       const targetNode = event.target as Node | null;
-      const targetElement =
-        targetNode instanceof Element ? targetNode : targetNode?.parentElement ?? null;
+      const preserveSelectionSelectors =
+        "[data-shape-toolbar='true'], [data-shape-controls='true'], [data-editor-toolbar='true']";
 
       if (!viewportElement || !targetNode) {
         return;
       }
 
-      if (targetElement?.closest("[data-shape-toolbar='true'], [data-shape-controls='true']")) {
+      const isPointerFromPreserveZone = event
+        .composedPath()
+        .some((node) => node instanceof Element && node.matches(preserveSelectionSelectors));
+
+      if (isPointerFromPreserveZone) {
         return;
       }
 
@@ -68,7 +84,7 @@ export function SlideViewport({ slideIndex = DEFAULT_SLIDE_INDEX }: { slideIndex
   }, [selectShape, setEditingShape]);
 
   return (
-    <div className="w-full max-w-[1200px] animate-in fade-in zoom-in duration-500">
+    <div className="animate-in fade-in duration-500" style={{ width: `${viewportWidth}px` }}>
       <div className="rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-100 to-slate-200 p-6 shadow-sm md:p-8">
         <div className="mx-auto w-full max-w-[960px] [container-type:inline-size]">
           <div

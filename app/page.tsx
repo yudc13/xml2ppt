@@ -42,11 +42,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const INITIAL_ACTIVE_SLIDE_INDEX = 0;
+const DEFAULT_ZOOM = 65;
+const MIN_ZOOM = 25;
+const MAX_ZOOM = 200;
+const ZOOM_STEP = 5;
 
 const SLIDE_NUMBERS = mockSlides.map((_, index) => index + 1);
 
 export default function Home() {
   const [activeSlideIndex, setActiveSlideIndex] = useState(INITIAL_ACTIVE_SLIDE_INDEX);
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#f2f4f7] font-sans text-slate-900">
@@ -63,10 +68,10 @@ export default function Home() {
           <SidebarInset className="flex flex-1 flex-col overflow-auto bg-[#f8fafc]/50 p-8">
             <div className="relative mb-6 flex items-center justify-center">
               <CollapsedSidebarTrigger />
-              <Toolbar slideIndex={activeSlideIndex} />
+              <Toolbar slideIndex={activeSlideIndex} zoom={zoom} onZoomChange={setZoom} />
             </div>
             <div className="flex flex-1 items-center justify-center">
-              <SlideViewport slideIndex={activeSlideIndex} />
+              <SlideViewport slideIndex={activeSlideIndex} zoom={zoom} />
             </div>
           </SidebarInset>
         </SidebarProvider>
@@ -87,7 +92,15 @@ function CollapsedSidebarTrigger() {
   );
 }
 
-function Toolbar({ slideIndex }: { slideIndex: number }) {
+function Toolbar({
+  slideIndex,
+  zoom,
+  onZoomChange,
+}: {
+  slideIndex: number;
+  zoom: number;
+  onZoomChange: (nextZoom: number) => void;
+}) {
   const selectedShapeId = useSlideEditorStore((state) => state.selectedShapeId);
   const bringToFront = useSlideEditorStore((state) => state.bringToFront);
   const sendToBack = useSlideEditorStore((state) => state.sendToBack);
@@ -105,6 +118,12 @@ function Toolbar({ slideIndex }: { slideIndex: number }) {
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
+  const canZoomOut = zoom > MIN_ZOOM;
+  const canZoomIn = zoom < MAX_ZOOM;
+
+  const updateZoom = (nextZoom: number) => {
+    onZoomChange(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom)));
+  };
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -191,7 +210,7 @@ function Toolbar({ slideIndex }: { slideIndex: number }) {
   };
 
   return (
-    <div className="max-w-full overflow-x-auto">
+    <div data-editor-toolbar="true" className="max-w-full overflow-x-auto">
       <div className="flex min-w-max items-center rounded-2xl border border-slate-200/90 bg-white/95 px-1.5 py-1 shadow-[0_1px_6px_rgba(15,23,42,0.05)] backdrop-blur supports-[backdrop-filter]:bg-white/80">
         <button
           type="button"
@@ -292,19 +311,24 @@ function Toolbar({ slideIndex }: { slideIndex: number }) {
 
         <button
           type="button"
-          className="cursor-pointer rounded-xl p-1.5 text-slate-600 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+          disabled={!canZoomOut}
+          onClick={() => updateZoom(zoom - ZOOM_STEP)}
+          className="cursor-pointer rounded-xl p-1.5 text-slate-600 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent"
         >
           <ZoomOut className="h-4 w-4" />
         </button>
         <button
           type="button"
+          onClick={() => updateZoom(DEFAULT_ZOOM)}
           className="hidden cursor-pointer rounded-xl px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 md:block"
         >
-          65%
+          {zoom}%
         </button>
         <button
           type="button"
-          className="cursor-pointer rounded-xl p-1.5 text-slate-600 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+          disabled={!canZoomIn}
+          onClick={() => updateZoom(zoom + ZOOM_STEP)}
+          className="cursor-pointer rounded-xl p-1.5 text-slate-600 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent"
         >
           <ZoomIn className="h-4 w-4" />
         </button>

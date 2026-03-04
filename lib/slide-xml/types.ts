@@ -21,6 +21,7 @@ export type ShapeType =
   | "line"
   | "arrow"
   | "table"
+  | "image"
   | (string & {})
 
 export type ShapeStyle = {

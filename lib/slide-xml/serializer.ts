@@ -11,6 +11,14 @@ const SHAPE_NUMERIC_ATTRIBUTE_KEYS = [
   "rotation",
   "presetHandlers",
 ] as const;
+const IMAGE_NUMERIC_ATTRIBUTE_KEYS = ["width", "height", "topLeftX", "topLeftY", "rotation"] as const;
+const CROP_NUMERIC_ATTRIBUTE_KEYS = [
+  "leftOffset",
+  "rightOffset",
+  "topOffset",
+  "bottomOffset",
+  "presetHandlers",
+] as const;
 
 const builder = new XMLBuilder({
   ignoreAttributes: false,
@@ -87,11 +95,54 @@ function shapeToXmlNode(shape: SlideShapeModel): XmlNode {
   return normalizeRgbaInTree(shapeNode) as XmlNode;
 }
 
+function imageToXmlNode(shape: SlideShapeModel): XmlNode {
+  const imageNode = cloneXmlNode(shape.rawNode);
+
+  imageNode["@_id"] = shape.attributes.id;
+  imageNode["@_src"] = String(imageNode["@_src"] ?? "");
+  imageNode["@_width"] = stringifyNumber(shape.attributes.width);
+  imageNode["@_height"] = stringifyNumber(shape.attributes.height);
+  imageNode["@_topLeftX"] = stringifyNumber(shape.attributes.topLeftX);
+  imageNode["@_topLeftY"] = stringifyNumber(shape.attributes.topLeftY);
+  imageNode["@_rotation"] = stringifyNumber(shape.attributes.rotation);
+
+  for (const key of IMAGE_NUMERIC_ATTRIBUTE_KEYS) {
+    const attributeKey = `@_${key}`;
+    const rawValue = imageNode[attributeKey];
+    if (typeof rawValue === "number") {
+      imageNode[attributeKey] = stringifyNumber(rawValue);
+    }
+  }
+
+  const cropNode = ensureXmlNode(imageNode.crop);
+  if (Object.keys(cropNode).length > 0) {
+    const nextCrop = { ...cropNode };
+    for (const key of CROP_NUMERIC_ATTRIBUTE_KEYS) {
+      const attributeKey = `@_${key}`;
+      const rawValue = nextCrop[attributeKey];
+      if (typeof rawValue === "number") {
+        nextCrop[attributeKey] = stringifyNumber(rawValue);
+      }
+    }
+    imageNode.crop = nextCrop;
+  }
+
+  delete imageNode["@_type"];
+
+  return normalizeRgbaInTree(imageNode) as XmlNode;
+}
+
 export function serializeSlideDocument(model: SlideDocumentModel): string {
   const slideNode = cloneXmlNode(model.rawSlideNode);
   const dataNode = ensureXmlNode(slideNode.data);
+  const orderedShapes = [...model.shapes];
 
-  dataNode.shape = model.shapes.map((shape) => shapeToXmlNode(shape));
+  dataNode.shape = orderedShapes
+    .filter((shape) => shape.attributes.type !== "image")
+    .map((shape) => shapeToXmlNode(shape));
+  dataNode.img = orderedShapes
+    .filter((shape) => shape.attributes.type === "image")
+    .map((shape) => imageToXmlNode(shape));
   slideNode.data = dataNode;
 
   const normalizedSlideNode = normalizeRgbaInTree(slideNode) as XmlNode;

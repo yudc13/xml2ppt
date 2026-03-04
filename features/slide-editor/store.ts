@@ -131,6 +131,26 @@ function updateShape(
   });
 }
 
+function reorderZIndex(
+  shapes: EditableSlideShape[],
+  selectedShapeId: string,
+  mode: "front" | "back",
+): EditableSlideShape[] {
+  const sorted = [...shapes].sort((a, b) => a.zIndex - b.zIndex);
+  const selected = sorted.find((shape) => shape.id === selectedShapeId);
+  if (!selected) {
+    return shapes;
+  }
+
+  const others = sorted.filter((shape) => shape.id !== selectedShapeId);
+  const reordered = mode === "front" ? [...others, selected] : [selected, ...others];
+
+  return reordered.map((shape, index) => ({
+    ...shape,
+    zIndex: index,
+  }));
+}
+
 function toXmlObject(value: XmlValue | undefined): XmlNode {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -860,12 +880,8 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
         return state;
       }
 
-      const currentMax = Math.max(...state.shapes.map((shape) => shape.zIndex), 0);
       return {
-        shapes: updateShape(state.shapes, state.selectedShapeId, (shape) => ({
-          ...shape,
-          zIndex: currentMax + 1,
-        })),
+        shapes: reorderZIndex(state.shapes, state.selectedShapeId, "front"),
       };
     });
   },
@@ -875,12 +891,8 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
         return state;
       }
 
-      const currentMin = Math.min(...state.shapes.map((shape) => shape.zIndex), 0);
       return {
-        shapes: updateShape(state.shapes, state.selectedShapeId, (shape) => ({
-          ...shape,
-          zIndex: currentMin - 1,
-        })),
+        shapes: reorderZIndex(state.shapes, state.selectedShapeId, "back"),
       };
     });
   },
