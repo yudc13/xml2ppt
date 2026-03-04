@@ -3,6 +3,7 @@
 一个基于 Next.js 16 的 Web PPT 编辑器：将 Slide XML 解析为可交互 HTML 画布，编辑后再序列化回 XML，并支持 PostgreSQL 持久化与版本回滚。
 
 ## 核心能力
+- 用户认证：Clerk OAuth（Google / GitHub）、全站路由保护、API 鉴权保护。
 - XML -> HTML：将 shape/img 等节点解析为可编辑模型并渲染到 16:9 画布。
 - HTML -> XML：编辑后保留结构语义并序列化回 XML。
 - 幻灯片编辑：拖拽、缩放、旋转、文本编辑、图形/表格插入、层级调整。
@@ -17,6 +18,7 @@
 - State: Zustand + TanStack Query
 - XML: fast-xml-parser
 - DB: PostgreSQL + Drizzle ORM
+- Auth: Clerk (`@clerk/nextjs`) + Svix webhook verify
 - Package Manager: bun（优先）
 
 ## 架构与数据流
@@ -49,6 +51,15 @@ bun install
 
 ```bash
 DATABASE_URL=postgres://<user>:<password>@<host>/<database>?sslmode=require
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxx
+CLERK_SECRET_KEY=sk_test_xxx
+CLERK_WEBHOOK_SECRET=whsec_xxx
+```
+
+在 Clerk Dashboard 中启用 `Google` 与 `GitHub` 登录方式，并将 webhook 指向：
+
+```bash
+POST /api/webhooks/clerk
 ```
 
 ### 3. 执行数据库迁移
@@ -85,6 +96,7 @@ bun run api:smoke  # API 冒烟测试（需 dev server 运行中）
 - `GET /api/slides/:slideId/revisions`：历史版本列表
 - `GET /api/slides/:slideId/revisions/:version`：历史版本详情
 - `POST /api/slides/:slideId/rollback`：回滚到指定版本
+- `POST /api/webhooks/clerk`：接收 Clerk 用户事件并同步本地 users 表
 
 错误响应统一结构：
 ```json
@@ -99,6 +111,7 @@ bun run api:smoke  # API 冒烟测试（需 dev server 运行中）
 - `deck(id, title, created_at, updated_at)`
 - `slide(id, deck_id, position, xml_content, version, created_at, updated_at)`
 - `slide_revision(id, slide_id, version, xml_content, created_at, created_by, reason)`
+- `users(id, clerk_user_id, email, name, avatar_url, deleted_at, created_at, updated_at)`
 - 约束：`unique(deck_id, position)`、`unique(slide_id, version)`
 
 ## 项目目录（核心）
@@ -123,7 +136,6 @@ lib/
 ```
 
 ## 已知限制
-- 当前无用户认证与权限隔离（单实例场景）。
 - 暂未支持多人协同编辑。
 - 暂未提供版本 diff，仅支持快照预览与回滚。
 
@@ -142,7 +154,7 @@ lib/
 - [ ] 增加 XML round-trip 回归测试（复杂富文本、表格、多图层场景）。
 - [ ] 增加编辑器 E2E 测试（创建文稿、编辑、保存、回滚主流程）。
 - [ ] 支持版本 diff 展示（结构差异 + 文本差异）。
-- [ ] 增加用户认证与文稿权限隔离（多租户/多用户）。
+- [ ] 增加文稿级权限隔离（当前仅完成登录态校验，未做 RBAC/多租户）。
 - [ ] 增加协同编辑能力（冲突合并策略 + 在线状态同步）。
 - [ ] 增加导入/导出能力（批量 XML 导入、PPTX 方向评估）。
 - [ ] 补充性能优化：大文稿分段渲染、虚拟化缩略图、操作节流。

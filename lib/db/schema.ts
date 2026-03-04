@@ -51,9 +51,29 @@ export const slideRevisions = pgTable(
   }),
 );
 
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    clerkUserId: text("clerk_user_id").notNull(),
+    email: text("email"),
+    name: text("name"),
+    avatarUrl: text("avatar_url"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    clerkUserIdUnique: uniqueIndex("users_clerk_user_id_unique").on(table.clerkUserId),
+    updatedAtIdx: index("idx_users_updated_at").on(table.updatedAt),
+  }),
+);
+
 export type Deck = typeof decks.$inferSelect;
 export type NewDeck = typeof decks.$inferInsert;
 export type Slide = typeof slides.$inferSelect;
 export type NewSlide = typeof slides.$inferInsert;
 export type SlideRevision = typeof slideRevisions.$inferSelect;
 export type NewSlideRevision = typeof slideRevisions.$inferInsert;
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;

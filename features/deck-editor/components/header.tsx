@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { UserButton } from "@clerk/nextjs";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -201,6 +202,9 @@ export function Header({ title, onTitleSave, backHref, showLogo = true }: Header
         >
           <Expand className="h-4 w-4" />
         </button>
+        <div className="ml-1 rounded-lg border border-slate-200 bg-white p-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)]">
+          <UserButton />
+        </div>
       </div>
     </header>
   );

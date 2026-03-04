@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { UserButton } from "@clerk/nextjs";
 import { FileText, Loader2, Plus, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -55,15 +56,20 @@ export function DeckListClient({ initialDecks }: { initialDecks: DeckItem[] }) {
                 <p className="mt-2 text-sm text-slate-600">默认进入列表页，点击任意文稿卡片进入详情编辑页面。</p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleCreateDeck}
-              disabled={createDeck.isPending}
-              className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {createDeck.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              新建 PPT
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCreateDeck}
+                disabled={createDeck.isPending}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {createDeck.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                新建 PPT
+              </button>
+              <div className="rounded-xl border border-slate-200 bg-white/90 p-1 shadow-[0_1px_6px_rgba(15,23,42,0.06)]">
+                <UserButton />
+              </div>
+            </div>
           </div>
           {error ? <p className="mt-3 text-sm text-rose-600">{error}</p> : null}
         </header>

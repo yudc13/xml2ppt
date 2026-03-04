@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { auth } from "@clerk/nextjs/server";
 
 import { apiError, apiOk } from "@/lib/api/response";
 import { createSlide, getSlidesByDeckId } from "@/lib/db/repository";
@@ -31,6 +32,7 @@ export async function GET(_: Request, context: RouteContext) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const { userId } = await auth();
   const params = await context.params;
   const parsedParams = paramsSchema.safeParse(params);
   if (!parsedParams.success) {
@@ -50,7 +52,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   try {
-    const slide = await createSlide(parsedParams.data.deckId, parsedPayload.data.xmlContent);
+    const slide = await createSlide(parsedParams.data.deckId, parsedPayload.data.xmlContent, userId);
     if (!slide) {
       return apiError("Deck not found", "DECK_NOT_FOUND", 404);
     }

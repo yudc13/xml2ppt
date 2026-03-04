@@ -5,9 +5,11 @@ import {
   decks,
   slideRevisions,
   slides,
+  users,
   type Deck,
   type Slide,
   type SlideRevision,
+  type User,
 } from "@/lib/db/schema";
 import { createBlankSlideXml } from "@/lib/slides/default-xml";
 
@@ -47,7 +49,7 @@ export async function getSlidesByDeckId(deckId: string): Promise<Slide[]> {
   return db.select().from(slides).where(eq(slides.deckId, deckId)).orderBy(asc(slides.position));
 }
 
-export async function createSlide(deckId: string, xmlContent?: string): Promise<Slide | null> {
+export async function createSlide(deckId: string, xmlContent?: string, actorId?: string | null): Promise<Slide | null> {
   const db = getDb();
   return db.transaction(async (tx) => {
     const [deck] = await tx.select({ id: decks.id }).from(decks).where(eq(decks.id, deckId)).limit(1);
@@ -75,7 +77,7 @@ export async function createSlide(deckId: string, xmlContent?: string): Promise<
       slideId: created.id,
       version: created.version,
       xmlContent: slideXmlContent,
-      createdBy: "local",
+      createdBy: actorId ?? "system",
       reason: "create",
     });
 
@@ -88,6 +90,7 @@ export async function updateSlideContent(params: {
   version: number;
   xmlContent: string;
   reason?: "manual_save" | "autosave" | "rollback";
+  actorId?: string | null;
 }): Promise<{ status: "updated"; slide: Slide } | { status: "conflict" } | { status: "not_found" }> {
   const db = getDb();
   const updated = await db.transaction(async (tx) => {
@@ -109,7 +112,7 @@ export async function updateSlideContent(params: {
       slideId: nextSlide.id,
       version: nextSlide.version,
       xmlContent: params.xmlContent,
-      createdBy: "local",
+      createdBy: params.actorId ?? "system",
       reason: params.reason ?? "manual_save",
     });
 
@@ -154,6 +157,7 @@ export async function rollbackSlideToRevision(params: {
   slideId: string;
   targetVersion: number;
   currentVersion: number;
+  actorId?: string | null;
 }): Promise<{ status: "updated"; slide: Slide } | { status: "conflict" } | { status: "not_found" }> {
   const db = getDb();
 
@@ -186,7 +190,7 @@ export async function rollbackSlideToRevision(params: {
       slideId: nextSlide.id,
       version: nextSlide.version,
       xmlContent: targetRevision.xmlContent,
-      createdBy: "local",
+      createdBy: params.actorId ?? "system",
       reason: "rollback",
     });
 
@@ -202,4 +206,50 @@ export async function rollbackSlideToRevision(params: {
   }
 
   return { status: "updated", slide: rolledBack };
+}
+
+export async function upsertUserByClerk(params: {
+  clerkUserId: string;
+  email?: string | null;
+  name?: string | null;
+  avatarUrl?: string | null;
+}): Promise<User> {
+  const db = getDb();
+
+  const [user] = await db
+    .insert(users)
+    .values({
+      clerkUserId: params.clerkUserId,
+      email: params.email ?? null,
+      name: params.name ?? null,
+      avatarUrl: params.avatarUrl ?? null,
+      deletedAt: null,
+    })
+    .onConflictDoUpdate({
+      target: users.clerkUserId,
+      set: {
+        email: params.email ?? null,
+        name: params.name ?? null,
+        avatarUrl: params.avatarUrl ?? null,
+        deletedAt: null,
+        updatedAt: sql`now()`,
+      },
+    })
+    .returning();
+
+  return user;
+}
+
+export async function markUserDeletedByClerkId(clerkUserId: string): Promise<User | null> {
+  const db = getDb();
+  const [user] = await db
+    .update(users)
+    .set({
+      deletedAt: sql`now()`,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(users.clerkUserId, clerkUserId))
+    .returning();
+
+  return user ?? null;
 }

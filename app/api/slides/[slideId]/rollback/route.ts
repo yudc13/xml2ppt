@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { auth } from "@clerk/nextjs/server";
 
 import { apiError, apiOk } from "@/lib/api/response";
 import { rollbackSlideToRevision } from "@/lib/db/repository";
@@ -17,6 +18,7 @@ type RouteContext = {
 };
 
 export async function POST(request: Request, context: RouteContext) {
+  const { userId } = await auth();
   const params = await context.params;
   const parsedParams = paramsSchema.safeParse(params);
   if (!parsedParams.success) {
@@ -40,6 +42,7 @@ export async function POST(request: Request, context: RouteContext) {
       slideId: parsedParams.data.slideId,
       targetVersion: parsedPayload.data.targetVersion,
       currentVersion: parsedPayload.data.currentVersion,
+      actorId: userId,
     });
 
     if (result.status === "not_found") {

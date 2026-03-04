@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { auth } from "@clerk/nextjs/server";
 
 import { apiError, apiOk } from "@/lib/api/response";
 import { updateSlideContent } from "@/lib/db/repository";
@@ -18,6 +19,7 @@ type RouteContext = {
 };
 
 export async function PATCH(request: Request, context: RouteContext) {
+  const { userId } = await auth();
   const params = await context.params;
   const parsedParams = paramsSchema.safeParse(params);
   if (!parsedParams.success) {
@@ -42,6 +44,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       version: parsedPayload.data.version,
       xmlContent: parsedPayload.data.xmlContent,
       reason: parsedPayload.data.reason,
+      actorId: userId,
     });
 
     if (result.status === "not_found") {
