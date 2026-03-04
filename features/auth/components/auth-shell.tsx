@@ -33,7 +33,7 @@ export function AuthShell({ title, subtitle, children }: AuthShellProps) {
           <div className="pointer-events-none absolute right-24 bottom-28 h-14 w-14 rounded-xl border border-white/15" />
         </aside>
 
-        <div className="p-5 sm:p-8 md:p-10">
+        <div className="min-h-[520px] p-5 sm:p-8 md:min-h-[560px] md:p-10">
           {children}
         </div>
       </section>
