@@ -18,17 +18,21 @@ type EditableSlideShape = {
 
 type SlideEditorState = {
   currentSlideIndex: number | null;
+  currentSlideMeta: Pick<SlideDocumentModel, "slideId" | "rawSlideNode"> | null;
+  isPreviewMode: boolean;
   shapes: EditableSlideShape[];
   selectedShapeId: string | null;
   editingShapeId: string | null;
   initializeSlide: (slideIndex: number, model: SlideDocumentModel) => void;
   selectShape: (shapeId: string | null) => void;
   setEditingShape: (shapeId: string | null) => void;
+  setPreviewMode: (value: boolean) => void;
   updateShapePosition: (shapeId: string, topLeftX: number, topLeftY: number) => void;
   updateShapeSize: (shapeId: string, width: number, height: number) => void;
   updateShapeContent: (shapeId: string, contentHtml: string, contentNode?: XmlValue) => void;
   bringToFront: () => void;
   sendToBack: () => void;
+  buildSlideDocumentModel: () => SlideDocumentModel | null;
 };
 
 function round2(value: number): number {
@@ -66,8 +70,10 @@ function updateShape(
   });
 }
 
-export const useSlideEditorStore = create<SlideEditorState>((set) => ({
+export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
   currentSlideIndex: null,
+  currentSlideMeta: null,
+  isPreviewMode: false,
   shapes: [],
   selectedShapeId: null,
   editingShapeId: null,
@@ -79,6 +85,10 @@ export const useSlideEditorStore = create<SlideEditorState>((set) => ({
 
       return {
         currentSlideIndex: slideIndex,
+        currentSlideMeta: {
+          slideId: model.slideId,
+          rawSlideNode: model.rawSlideNode,
+        },
         selectedShapeId: null,
         editingShapeId: null,
         shapes: model.shapes.map((shape, index) => ({
@@ -97,6 +107,13 @@ export const useSlideEditorStore = create<SlideEditorState>((set) => ({
   },
   setEditingShape: (shapeId) => {
     set(() => ({ editingShapeId: shapeId }));
+  },
+  setPreviewMode: (value) => {
+    set(() => ({
+      isPreviewMode: value,
+      selectedShapeId: value ? null : get().selectedShapeId,
+      editingShapeId: value ? null : get().editingShapeId,
+    }));
   },
   updateShapePosition: (shapeId, topLeftX, topLeftY) => {
     set((state) => ({
@@ -173,6 +190,26 @@ export const useSlideEditorStore = create<SlideEditorState>((set) => ({
         })),
       };
     });
+  },
+  buildSlideDocumentModel: () => {
+    const state = get();
+    if (!state.currentSlideMeta) {
+      return null;
+    }
+
+    const orderedShapes = [...state.shapes]
+      .sort((a, b) => a.zIndex - b.zIndex)
+      .map((shape) => ({
+        attributes: shape.attributes,
+        style: shape.style,
+        rawNode: shape.rawNode,
+      }));
+
+    return {
+      slideId: state.currentSlideMeta.slideId,
+      rawSlideNode: state.currentSlideMeta.rawSlideNode,
+      shapes: orderedShapes,
+    };
   },
 }));
 

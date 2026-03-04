@@ -2,7 +2,9 @@
 
 import { type ReactNode, useState } from "react";
 import {
+  Check,
   ImageIcon,
+  Loader2,
   Palette,
   Shapes,
   Sparkles,
@@ -16,6 +18,7 @@ import { SlideViewport } from "@/components/editor/slide-viewport";
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { useSlideEditorStore } from "@/features/slide-editor/store";
+import { serializeSlideDocument } from "@/lib/slide-xml/serializer";
 import { slides as mockSlides } from "@/mock/slides";
 import {
   SidebarInset,
@@ -46,7 +49,7 @@ export default function Home() {
           <SidebarInset className="flex flex-1 flex-col overflow-auto bg-[#f8fafc]/50 p-8">
             <div className="relative mb-6 flex items-center justify-center">
               <CollapsedSidebarTrigger />
-              <Toolbar />
+              <Toolbar slideIndex={activeSlideIndex} />
             </div>
             <div className="flex flex-1 items-center justify-center">
               <SlideViewport slideIndex={activeSlideIndex} />
@@ -70,10 +73,50 @@ function CollapsedSidebarTrigger() {
   );
 }
 
-function Toolbar() {
+function Toolbar({ slideIndex }: { slideIndex: number }) {
   const selectedShapeId = useSlideEditorStore((state) => state.selectedShapeId);
   const bringToFront = useSlideEditorStore((state) => state.bringToFront);
   const sendToBack = useSlideEditorStore((state) => state.sendToBack);
+  const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
+  const setPreviewMode = useSlideEditorStore((state) => state.setPreviewMode);
+  const buildSlideDocumentModel = useSlideEditorStore((state) => state.buildSlideDocumentModel);
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
+
+  const handleSave = async () => {
+    const model = buildSlideDocumentModel();
+    if (!model || isSaving) {
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("idle");
+    try {
+      const xml = serializeSlideDocument(model);
+      const response = await fetch("/api/slides/save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          slideIndex,
+          xml,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("save failed");
+      }
+
+      setSaveStatus("success");
+      window.setTimeout(() => setSaveStatus("idle"), 1500);
+    } catch {
+      setSaveStatus("error");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <div className="max-w-full overflow-x-auto">
@@ -98,6 +141,27 @@ function Toolbar() {
         <div className="mx-1.5 h-6 w-px bg-slate-200" />
 
         <ToolbarButton icon={<Palette className="h-4 w-4" />} label="格式" />
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={isSaving}
+          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
+        >
+          {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {saveStatus === "success" ? <Check className="h-4 w-4 text-emerald-600" /> : null}
+          {saveStatus === "error" ? "保存失败" : isSaving ? "保存中..." : saveStatus === "success" ? "已保存" : "保存"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setPreviewMode(!isPreviewMode)}
+          className={`cursor-pointer rounded-xl px-3 py-1.5 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${
+            isPreviewMode
+              ? "bg-sky-50 text-sky-700 hover:bg-sky-100/80"
+              : "text-slate-700 hover:bg-slate-100/80"
+          }`}
+        >
+          {isPreviewMode ? "退出预览" : "预览"}
+        </button>
         <button
           type="button"
           disabled={!selectedShapeId}

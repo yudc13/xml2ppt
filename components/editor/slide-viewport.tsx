@@ -27,12 +27,14 @@ export function SlideViewport({ slideIndex = DEFAULT_SLIDE_INDEX }: { slideIndex
   const selectShape = useSlideEditorStore((state) => state.selectShape);
   const setEditingShape = useSlideEditorStore((state) => state.setEditingShape);
   const currentSlideIndex = useSlideEditorStore((state) => state.currentSlideIndex);
+  const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
   const storedShapes = useSlideEditorStore((state) => state.shapes);
   const interactiveShapes = useMemo(
     () => [...storedShapes].sort((a, b) => a.zIndex - b.zIndex),
     [storedShapes],
   );
   const shouldUseStoreShapes = isHydrated && currentSlideIndex === slideIndex;
+  const interactiveEnabled = shouldUseStoreShapes && !isPreviewMode;
 
   useEffect(() => {
     initializeSlide(slideIndex, model);
@@ -68,13 +70,20 @@ export function SlideViewport({ slideIndex = DEFAULT_SLIDE_INDEX }: { slideIndex
             className="relative aspect-[16/9] w-full overflow-visible rounded-xl bg-white shadow-[0_8px_30px_rgba(15,23,42,0.08)] [--slide-unit:calc(100cqw/960)]"
             onPointerDown={(event) => {
               if (event.target === event.currentTarget) {
-                selectShape(null);
+                if (!isPreviewMode) {
+                  selectShape(null);
+                }
               }
             }}
           >
             {shouldUseStoreShapes
               ? interactiveShapes.map((shape) => (
-                  <SlideShape key={shape.id} shape={shape} viewportRef={viewportRef} interactive />
+                  <SlideShape
+                    key={shape.id}
+                    shape={shape}
+                    viewportRef={viewportRef}
+                    interactive={interactiveEnabled}
+                  />
                 ))
               : model.shapes.map((shape) => (
                   <SlideShape key={shape.attributes.id} shape={shape} />

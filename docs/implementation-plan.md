@@ -36,8 +36,8 @@
 - [x] 实现 Z-Index 管理（置顶/置底）
 
 ### Phase 4: 同步与导出（Sync & Export）
-- [ ] 实现 Save 接口：调用 Serializer 并通过 API 提交 XML
-- [ ] 实现 Preview 模式：切换只读状态并隐藏辅助线
+- [x] 实现 Save 接口：调用 Serializer 并通过 API 提交 XML
+- [x] 实现 Preview 模式：切换只读状态并隐藏辅助线
 
 ## 4. 关键数据结构（State Schema）
 - [ ] 定义 `SlideState`（页面级状态）
