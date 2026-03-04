@@ -921,7 +921,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     [syncShapeContentFromDom, textStyle.color, textStyle.fontFamily, textStyle.fontSize],
   );
 
-  const beginDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const beginDrag = (event: ReactPointerEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
     captureHistorySnapshot();
@@ -953,7 +953,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     window.addEventListener("pointerup", onUp);
   };
 
-  const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const beginResize = (event: ReactPointerEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
     captureHistorySnapshot();
@@ -985,7 +985,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     window.addEventListener("pointerup", onUp);
   };
 
-  const beginRotate = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const beginRotate = (event: ReactPointerEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
     captureHistorySnapshot();
@@ -1205,12 +1205,13 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
                 return;
               }
 
+              const nativeEvent = event.nativeEvent as InputEvent;
               const draftStyle = draftTextStyleRef.current;
               if (!draftStyle) {
                 return;
               }
 
-              if (event.inputType !== "insertText" || !event.data) {
+              if (nativeEvent.inputType !== "insertText" || !nativeEvent.data) {
                 return;
               }
 
@@ -1223,7 +1224,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
                 restoreCollapsedSelection(element, savedCollapsedRangeRef.current);
               }
 
-              if (!insertStyledTextAtCaret(element, event.data, draftStyle)) {
+              if (!insertStyledTextAtCaret(element, nativeEvent.data, draftStyle)) {
                 return;
               }
 

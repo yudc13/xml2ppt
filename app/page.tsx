@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowUpToLine,
@@ -25,7 +25,6 @@ import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { useSlideEditorStore } from "@/features/slide-editor/store";
 import { serializeSlideDocument } from "@/lib/slide-xml/serializer";
-import { slides as mockSlides } from "@/mock/slides";
 import {
   SidebarInset,
   SidebarProvider,
@@ -46,52 +45,253 @@ const DEFAULT_ZOOM = 65;
 const MIN_ZOOM = 25;
 const MAX_ZOOM = 200;
 const ZOOM_STEP = 5;
-const DEFAULT_SLIDE_XML =
-  '<slide id="{SLIDE_ID}"><style><fill><fillColor color="rgba(252, 252, 252, 1)"/></fill></style><data><shape id="{SHAPE_ID}" type="rect" width="960" height="540" topLeftX="0" topLeftY="0" rotation="0"><fill><fillColor color="rgba(252, 252, 252, 1)"/></fill></shape></data><note id="{NOTE_ID}"><content><p></p></content></note></slide>';
+const DECK_ID_STORAGE_KEY = "ppt:deck-id";
 
-function createId(prefix: string): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}-${crypto.randomUUID()}`;
+type PersistedSlide = {
+  id: string;
+  deckId: string;
+  position: number;
+  xmlContent: string;
+  version: number;
+  updatedAt: string;
+};
+
+type SaveStatus = "idle" | "success" | "error" | "conflict";
+
+class ApiRequestError extends Error {
+  code?: string;
+  status?: number;
+
+  constructor(message: string, code?: string, status?: number) {
+    super(message);
+    this.code = code;
+    this.status = status;
   }
-
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createBlankSlideXml(): string {
-  return DEFAULT_SLIDE_XML
-    .replace("{SLIDE_ID}", createId("slide"))
-    .replace("{SHAPE_ID}", createId("shape-bg"))
-    .replace("{NOTE_ID}", createId("note"));
+async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+  const response = await fetch(input, init);
+  const payload = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    message?: string;
+    code?: string;
+  };
+
+  if (!response.ok || payload.ok === false) {
+    throw new ApiRequestError(
+      payload.message ?? `Request failed with status ${response.status}`,
+      payload.code,
+      response.status,
+    );
+  }
+
+  return payload as T;
 }
 
 export default function Home() {
   const buildSlideDocumentModel = useSlideEditorStore((state) => state.buildSlideDocumentModel);
-  const [slides, setSlides] = useState<string[]>(() => [...mockSlides]);
+  const currentSlideIndexInStore = useSlideEditorStore((state) => state.currentSlideIndex);
+  const storeShapes = useSlideEditorStore((state) => state.shapes);
+
+  const [deckId, setDeckId] = useState<string | null>(null);
+  const [slides, setSlides] = useState<PersistedSlide[]>([]);
   const [activeSlideIndex, setActiveSlideIndex] = useState(INITIAL_ACTIVE_SLIDE_INDEX);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
-  const slideNumbers = useMemo(() => slides.map((_, index) => index + 1), [slides]);
-  const currentSlideXml = slides[activeSlideIndex] ?? slides[INITIAL_ACTIVE_SLIDE_INDEX];
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const saveStatusTimeoutRef = useRef<number | null>(null);
 
-  const persistActiveSlide = () => {
-    const model = buildSlideDocumentModel();
-    if (!model) {
-      return;
+  const activeSlide = slides[activeSlideIndex] ?? null;
+  const currentSlideXml = activeSlide?.xmlContent;
+  const slideNumbers = useMemo(() => slides.map((_, index) => index + 1), [slides]);
+  const shapeMutationSignal = useMemo(
+    () =>
+      storeShapes
+        .map(
+          (shape) =>
+            `${shape.id}:${shape.zIndex}:${shape.attributes.topLeftX}:${shape.attributes.topLeftY}:${shape.attributes.width}:${shape.attributes.height}:${shape.attributes.rotation}:${shape.contentHtml}`,
+        )
+        .join("|"),
+    [storeShapes],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (saveStatusTimeoutRef.current) {
+        window.clearTimeout(saveStatusTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      setIsBootstrapping(true);
+      setBootstrapError(null);
+
+      try {
+        const storedDeckId = window.localStorage.getItem(DECK_ID_STORAGE_KEY);
+        let nextDeckId = storedDeckId;
+
+        if (!nextDeckId) {
+          const created = await requestJson<{ ok: true; deck: { id: string } }>("/api/decks", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              title: "未命名演示文稿",
+            }),
+          });
+          nextDeckId = created.deck.id;
+          window.localStorage.setItem(DECK_ID_STORAGE_KEY, nextDeckId);
+        }
+
+        const loadedSlidesResponse = await requestJson<{ ok: true; slides: PersistedSlide[] }>(
+          `/api/decks/${nextDeckId}/slides`,
+        );
+        let nextSlides = loadedSlidesResponse.slides;
+
+        if (nextSlides.length === 0) {
+          const createdSlideResponse = await requestJson<{ ok: true; slide: PersistedSlide }>(
+            `/api/decks/${nextDeckId}/slides`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({}),
+            },
+          );
+          nextSlides = [createdSlideResponse.slide];
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setDeckId(nextDeckId);
+        setSlides(nextSlides);
+        setActiveSlideIndex(INITIAL_ACTIVE_SLIDE_INDEX);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : "加载失败";
+        setBootstrapError(message);
+      } finally {
+        if (!cancelled) {
+          setIsBootstrapping(false);
+        }
+      }
+    };
+
+    void bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isDirty = useMemo(() => {
+    void shapeMutationSignal;
+
+    if (!activeSlide) {
+      return false;
     }
 
-    const xml = serializeSlideDocument(model);
-    setSlides((prev) => {
-      if (activeSlideIndex < 0 || activeSlideIndex >= prev.length) {
-        return prev;
+    if (currentSlideIndexInStore !== activeSlideIndex) {
+      return false;
+    }
+
+    const model = buildSlideDocumentModel();
+    if (!model) {
+      return false;
+    }
+
+    const nextXml = serializeSlideDocument(model);
+    return nextXml !== activeSlide.xmlContent;
+  }, [activeSlide, activeSlideIndex, buildSlideDocumentModel, currentSlideIndexInStore, shapeMutationSignal]);
+
+  const clearSaveStatusLater = () => {
+    if (saveStatusTimeoutRef.current) {
+      window.clearTimeout(saveStatusTimeoutRef.current);
+    }
+
+    saveStatusTimeoutRef.current = window.setTimeout(() => {
+      setSaveStatus("idle");
+    }, 1500);
+  };
+
+  const persistActiveSlide = async (options?: { showStatus?: boolean }) => {
+    const showStatus = options?.showStatus ?? false;
+    if (!activeSlide || isSaving) {
+      return !isSaving;
+    }
+
+    const model = buildSlideDocumentModel();
+    if (!model) {
+      return true;
+    }
+
+    const xmlContent = serializeSlideDocument(model);
+    if (xmlContent === activeSlide.xmlContent) {
+      if (showStatus) {
+        setSaveStatus("success");
+        clearSaveStatusLater();
+      }
+      return true;
+    }
+
+    setIsSaving(true);
+    if (showStatus) {
+      setSaveStatus("idle");
+    }
+
+    try {
+      const saved = await requestJson<{ ok: true; slide: PersistedSlide }>(`/api/slides/${activeSlide.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          version: activeSlide.version,
+          xmlContent,
+        }),
+      });
+
+      setSlides((prev) =>
+        prev.map((slide) => {
+          if (slide.id !== activeSlide.id) {
+            return slide;
+          }
+
+          return saved.slide;
+        }),
+      );
+      setLastSavedAt(saved.slide.updatedAt);
+
+      if (showStatus) {
+        setSaveStatus("success");
+        clearSaveStatusLater();
       }
 
-      if (prev[activeSlideIndex] === xml) {
-        return prev;
+      return true;
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.code === "SLIDE_VERSION_CONFLICT") {
+        setSaveStatus("conflict");
+      } else {
+        setSaveStatus("error");
       }
-
-      const nextSlides = [...prev];
-      nextSlides[activeSlideIndex] = xml;
-      return nextSlides;
-    });
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSelectSlide = (slideNumber: number) => {
@@ -100,17 +300,66 @@ export default function Home() {
       return;
     }
 
-    persistActiveSlide();
-    setActiveSlideIndex(nextIndex);
+    void (async () => {
+      const ok = await persistActiveSlide();
+      if (!ok) {
+        return;
+      }
+
+      setActiveSlideIndex(nextIndex);
+    })();
   };
 
   const handleCreateSlide = () => {
-    persistActiveSlide();
+    if (!deckId || isSaving) {
+      return;
+    }
 
-    const nextIndex = slides.length;
-    setSlides((prev) => [...prev, createBlankSlideXml()]);
-    setActiveSlideIndex(nextIndex);
+    void (async () => {
+      const ok = await persistActiveSlide();
+      if (!ok) {
+        return;
+      }
+
+      try {
+        const created = await requestJson<{ ok: true; slide: PersistedSlide }>(`/api/decks/${deckId}/slides`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({}),
+        });
+
+        setSlides((prev) => {
+          const nextSlides = [...prev, created.slide];
+          setActiveSlideIndex(nextSlides.length - 1);
+          return nextSlides;
+        });
+      } catch {
+        setSaveStatus("error");
+      }
+    })();
   };
+
+  const handleManualSave = () => {
+    void persistActiveSlide({ showStatus: true });
+  };
+
+  if (isBootstrapping) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#f2f4f7] text-sm text-slate-600">
+        正在加载演示文稿...
+      </div>
+    );
+  }
+
+  if (bootstrapError) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#f2f4f7] px-6 text-sm text-rose-600">
+        数据加载失败：{bootstrapError}
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#f2f4f7] font-sans text-slate-900">
@@ -120,7 +369,7 @@ export default function Home() {
         <SidebarProvider defaultOpen>
           <Sidebar
             slides={slideNumbers}
-            slideXmlList={slides}
+            slideXmlList={slides.map((slide) => slide.xmlContent)}
             activeSlide={activeSlideIndex + 1}
             onSlideSelect={handleSelectSlide}
             onCreateSlide={handleCreateSlide}
@@ -129,7 +378,15 @@ export default function Home() {
           <SidebarInset className="flex flex-1 flex-col overflow-auto bg-[#f8fafc]/50 p-8">
             <div className="relative mb-6 flex items-center justify-center">
               <CollapsedSidebarTrigger />
-              <Toolbar slideIndex={activeSlideIndex} zoom={zoom} onZoomChange={setZoom} />
+              <Toolbar
+                zoom={zoom}
+                onZoomChange={setZoom}
+                onSave={handleManualSave}
+                isSaving={isSaving}
+                saveStatus={saveStatus}
+                isDirty={isDirty}
+                lastSavedAt={lastSavedAt}
+              />
             </div>
             <div className="flex flex-1 items-center justify-center">
               <SlideViewport slideIndex={activeSlideIndex} slideXml={currentSlideXml} zoom={zoom} />
@@ -154,13 +411,21 @@ function CollapsedSidebarTrigger() {
 }
 
 function Toolbar({
-  slideIndex,
   zoom,
   onZoomChange,
+  onSave,
+  isSaving,
+  saveStatus,
+  isDirty,
+  lastSavedAt,
 }: {
-  slideIndex: number;
   zoom: number;
   onZoomChange: (nextZoom: number) => void;
+  onSave: () => void;
+  isSaving: boolean;
+  saveStatus: SaveStatus;
+  isDirty: boolean;
+  lastSavedAt: string | null;
 }) {
   const selectedShapeId = useSlideEditorStore((state) => state.selectedShapeId);
   const bringToFront = useSlideEditorStore((state) => state.bringToFront);
@@ -170,15 +435,12 @@ function Toolbar({
   const insertTable = useSlideEditorStore((state) => state.insertTable);
   const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
   const setPreviewMode = useSlideEditorStore((state) => state.setPreviewMode);
-  const buildSlideDocumentModel = useSlideEditorStore((state) => state.buildSlideDocumentModel);
   const copySelectedShape = useSlideEditorStore((state) => state.copySelectedShape);
   const pasteCopiedShape = useSlideEditorStore((state) => state.pasteCopiedShape);
   const deleteSelectedShape = useSlideEditorStore((state) => state.deleteSelectedShape);
   const undo = useSlideEditorStore((state) => state.undo);
   const redo = useSlideEditorStore((state) => state.redo);
 
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const canZoomOut = zoom > MIN_ZOOM;
   const canZoomIn = zoom < MAX_ZOOM;
 
@@ -236,42 +498,28 @@ function Toolbar({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [copySelectedShape, deleteSelectedShape, isPreviewMode, pasteCopiedShape, redo, undo]);
 
-  const handleSave = async () => {
-    const model = buildSlideDocumentModel();
-    if (!model || isSaving) {
-      return;
-    }
-
-    setIsSaving(true);
-    setSaveStatus("idle");
-    try {
-      const xml = serializeSlideDocument(model);
-      const response = await fetch("/api/slides/save", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          slideIndex,
-          xml,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("save failed");
-      }
-
-      setSaveStatus("success");
-      window.setTimeout(() => setSaveStatus("idle"), 1500);
-    } catch {
-      setSaveStatus("error");
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  const saveStatusText =
+    saveStatus === "conflict"
+      ? "版本冲突"
+      : saveStatus === "error"
+        ? "保存失败"
+        : isSaving
+          ? "保存中..."
+          : saveStatus === "success"
+            ? "已保存"
+            : "保存";
 
   return (
     <div data-editor-toolbar="true" className="max-w-full overflow-x-auto">
+      <div className="mb-2 text-center text-xs text-slate-500">
+        {saveStatus === "conflict"
+          ? "内容已过期，请刷新后重试"
+          : isDirty
+            ? "有未保存修改"
+            : lastSavedAt
+              ? `上次保存：${new Date(lastSavedAt).toLocaleTimeString()}`
+              : ""}
+      </div>
       <div className="flex min-w-max items-center rounded-2xl border border-slate-200/90 bg-white/95 px-1.5 py-1 shadow-[0_1px_6px_rgba(15,23,42,0.05)] backdrop-blur supports-[backdrop-filter]:bg-white/80">
         <button
           type="button"
@@ -320,7 +568,7 @@ function Toolbar({
         <ToolbarButton icon={<Palette className="h-4 w-4" />} label="格式" />
         <button
           type="button"
-          onClick={handleSave}
+          onClick={onSave}
           disabled={isSaving}
           className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
         >
@@ -328,14 +576,12 @@ function Toolbar({
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : saveStatus === "success" ? (
             <Check className="h-4 w-4 text-emerald-600" />
-          ) : saveStatus === "error" ? (
+          ) : saveStatus === "error" || saveStatus === "conflict" ? (
             <CircleAlert className="h-4 w-4 text-rose-600" />
           ) : (
             <Save className="h-4 w-4" />
           )}
-          <span className="hidden md:inline">
-            {saveStatus === "error" ? "保存失败" : isSaving ? "保存中..." : saveStatus === "success" ? "已保存" : "保存"}
-          </span>
+          <span className="hidden md:inline">{saveStatusText}</span>
         </button>
         <button
           type="button"
