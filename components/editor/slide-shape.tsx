@@ -3,6 +3,15 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import {
+  AlignJustify,
+  BrushCleaning,
+  ChevronDown,
+  Minus,
+  Palette,
+  Plus,
+  Sparkles,
+} from "lucide-react";
 
 import { useSlideEditorStore } from "@/features/slide-editor/store";
 import type { EditableSlideShape } from "@/features/slide-editor/store";
@@ -10,16 +19,17 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { buildShapeContentHtml } from "@/lib/slide-xml/rich-text";
 import type { SlideShapeModel, TableModel, XmlNode, XmlValue } from "@/lib/slide-xml/types";
 
-const RESIZE_HANDLE_SIZE = 10;
-const HANDLE_HIT_SIZE = 32;
+const RESIZE_HANDLE_SIZE = 12;
+const HANDLE_HIT_SIZE = 36;
 const TEXT_DRAG_EDGE_SIZE = 14;
 const ROTATION_SNAP_DEGREES = 15;
-const ROTATE_HANDLE_OFFSET = 28;
+const ROTATE_HANDLE_OFFSET = 32;
 const TOOLBAR_GAP = 12;
 const HANDLE_EDGE_THRESHOLD = 40;
 const SLIDE_BASE_WIDTH = 960;
 const SLIDE_BASE_HEIGHT = 540;
 const CONTROL_OVERLAY_Z_INDEX = 10_000;
+const TOOLBAR_PORTAL_Z_INDEX = 10_100;
 
 const FONT_OPTIONS = ["Montserrat", "Open Sans", "Noto Sans SC"] as const;
 const COLOR_OPTIONS = [
@@ -28,6 +38,27 @@ const COLOR_OPTIONS = [
   "rgba(239, 95, 0, 1)",
   "rgba(31, 35, 41, 1)",
   "rgba(100, 100, 100, 1)",
+] as const;
+const SHAPE_FILL_OPTIONS = [
+  "rgba(255, 255, 255, 1)",
+  "rgba(234, 88, 12, 1)",
+  "rgba(37, 99, 235, 1)",
+  "rgba(13, 148, 136, 1)",
+  "rgba(148, 163, 184, 1)",
+  "rgba(31, 41, 55, 1)",
+] as const;
+const SHAPE_BORDER_OPTIONS = [
+  "rgba(17, 24, 39, 1)",
+  "rgba(71, 85, 105, 1)",
+  "rgba(234, 88, 12, 1)",
+  "rgba(37, 99, 235, 1)",
+  "rgba(34, 197, 94, 1)",
+  "rgba(168, 85, 247, 1)",
+] as const;
+const BORDER_STYLE_OPTIONS = [
+  { label: "实线", value: "solid" },
+  { label: "虚线", value: "dashed" },
+  { label: "点线", value: "dotted" },
 ] as const;
 
 type TextStyleState = {
@@ -77,7 +108,7 @@ function getTopToolbarPortalStyle(params: {
     left: viewportRect.left + (shape.x + shape.width / 2) * scaleX,
     top: viewportRect.top + shape.y * scaleY - TOOLBAR_GAP,
     transform: "translate(-50%, -100%)",
-    zIndex: 9999,
+    zIndex: TOOLBAR_PORTAL_Z_INDEX,
   };
 }
 
@@ -141,6 +172,21 @@ function getBorderWidth(shapeNode: XmlNode): number {
   const borderNode = border as XmlNode;
   const width = Number(borderNode["@_width"]);
   return Number.isFinite(width) && width > 0 ? width : 2;
+}
+
+function getBorderStyle(shapeNode: XmlNode): "solid" | "dashed" | "dotted" {
+  const border = shapeNode.border;
+  if (!border || typeof border !== "object" || Array.isArray(border)) {
+    return "solid";
+  }
+
+  const borderNode = border as XmlNode;
+  const style = borderNode["@_style"];
+  if (style === "dashed" || style === "dotted") {
+    return style;
+  }
+
+  return "solid";
 }
 
 function getShapeText(value: XmlValue | undefined): string {
@@ -556,6 +602,10 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const updateShapeSize = useSlideEditorStore((state) => state.updateShapeSize);
   const updateShapeRotation = useSlideEditorStore((state) => state.updateShapeRotation);
   const updateShapeContent = useSlideEditorStore((state) => state.updateShapeContent);
+  const updateShapeFillColor = useSlideEditorStore((state) => state.updateShapeFillColor);
+  const updateShapeBorderStyle = useSlideEditorStore((state) => state.updateShapeBorderStyle);
+  const updateShapeBorderColor = useSlideEditorStore((state) => state.updateShapeBorderColor);
+  const updateShapeBorderWidth = useSlideEditorStore((state) => state.updateShapeBorderWidth);
   const updateTableCell = useSlideEditorStore((state) => state.updateTableCell);
   const addTableRow = useSlideEditorStore((state) => state.addTableRow);
   const removeTableRow = useSlideEditorStore((state) => state.removeTableRow);
@@ -569,6 +619,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const backgroundColor = useMemo(() => getFillColor(shape.rawNode), [shape.rawNode]);
   const borderColor = useMemo(() => getBorderColor(shape.rawNode), [shape.rawNode]);
   const borderWidth = useMemo(() => getBorderWidth(shape.rawNode), [shape.rawNode]);
+  const borderStyle = useMemo(() => getBorderStyle(shape.rawNode), [shape.rawNode]);
 
   const isInteractive = interactive;
   const shapeId = "id" in shape ? shape.id : shape.attributes.id;
@@ -585,6 +636,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         ? buildShapeContentHtml(shape.rawNode.content)
         : "";
   const hasRichTextContent = !isTableShape && contentHtml.length > 0;
+  const isShapeStyleTarget = !hasRichTextContent && !isTableShape;
   const tableModel = useMemo(() => parseTableModel(shape.rawNode.content), [shape.rawNode.content]);
   const arrowMarkerId = useMemo(
     () => `shape-arrow-${shapeId.replace(/[^a-zA-Z0-9_-]/g, "")}`,
@@ -930,7 +982,10 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
           transformOrigin: "center center",
           background: isLineLikeShape ? undefined : backgroundColor,
           borderRadius: isEllipseShape ? "9999px" : shape.style.borderRadius,
-          border: !isLineLikeShape && borderColor ? `${borderWidth}px solid ${borderColor}` : undefined,
+          border:
+            !isLineLikeShape && borderColor && borderWidth > 0
+              ? `${borderWidth}px ${borderStyle} ${borderColor}`
+              : undefined,
           outline: isSelected ? "2px solid rgba(14, 116, 244, 0.7)" : undefined,
           outlineOffset: isSelected ? "-1px" : undefined,
         }}
@@ -957,8 +1012,11 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
               y1="50"
               x2="98"
               y2="50"
-              stroke={borderColor ?? "rgba(13, 116, 206, 1)"}
-              strokeWidth={Math.max(1, borderWidth)}
+              stroke={borderWidth <= 0 ? "transparent" : (borderColor ?? "rgba(13, 116, 206, 1)")}
+              strokeWidth={Math.max(0, borderWidth)}
+              strokeDasharray={
+                borderStyle === "dashed" ? "8 6" : borderStyle === "dotted" ? "2 5" : undefined
+              }
               markerEnd={isArrowShape ? `url(#${arrowMarkerId})` : undefined}
             />
           </svg>
@@ -1125,6 +1183,34 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         />
       ) : null}
 
+      {isSelected && isShapeStyleTarget ? (
+        <ShapeStyleToolbar
+          isMobile={isMobile}
+          portalStyle={toolbarPortalStyle}
+          isLineLikeShape={isLineLikeShape}
+          fillColor={backgroundColor ?? "rgba(255, 255, 255, 1)"}
+          borderColor={borderColor ?? "rgba(31, 35, 41, 1)"}
+          borderWidth={borderWidth}
+          borderStyle={borderStyle}
+          onFillColorChange={(color) => {
+            captureHistorySnapshot();
+            updateShapeFillColor(shapeId, color);
+          }}
+          onBorderStyleChange={(style) => {
+            captureHistorySnapshot();
+            updateShapeBorderStyle(shapeId, style);
+          }}
+          onBorderColorChange={(color) => {
+            captureHistorySnapshot();
+            updateShapeBorderColor(shapeId, color);
+          }}
+          onBorderWidthChange={(width) => {
+            captureHistorySnapshot();
+            updateShapeBorderWidth(shapeId, width);
+          }}
+        />
+      ) : null}
+
         {isSelected && isEditing && hasRichTextContent ? (
           <>
             <div
@@ -1152,7 +1238,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       </div>
       {isSelected && controlOverlayStyle && typeof document !== "undefined"
         ? createPortal(
-            <div className="pointer-events-none absolute overflow-visible" style={controlOverlayStyle}>
+            <div data-shape-controls="true" className="pointer-events-none absolute overflow-visible" style={controlOverlayStyle}>
               <div
                 className="pointer-events-none absolute inset-0 overflow-visible"
                 style={{
@@ -1161,33 +1247,35 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
                 }}
               >
                 <div
-                  className="pointer-events-none absolute w-px bg-sky-500/70"
+                  className="pointer-events-none absolute w-px bg-gradient-to-b from-sky-400/80 to-sky-600/80"
                   style={rotateHandleLineStyle}
                 />
-                <div
-                  className="pointer-events-auto absolute"
+                <button
+                  type="button"
+                  aria-label="旋转形状"
+                  className="group pointer-events-auto absolute rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:ring-offset-1 focus-visible:ring-offset-white active:scale-95"
                   style={{
                     ...rotateHandleStyle,
                     width: HANDLE_HIT_SIZE,
                     height: HANDLE_HIT_SIZE,
+                    cursor: "grab",
                   }}
                   onPointerDown={beginRotate}
                 >
                   <div
-                    className="absolute rounded-full border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
+                    className="absolute rounded-full border-2 border-white bg-sky-500 shadow-[0_8px_18px_rgba(14,116,244,0.35),0_0_0_1px_rgba(14,116,244,0.7)] transition-transform duration-150 group-hover:scale-105"
                     style={{
                       left: "50%",
                       top: "50%",
                       width: RESIZE_HANDLE_SIZE,
                       height: RESIZE_HANDLE_SIZE,
                       transform: "translate(-50%, -50%)",
-                      cursor: "grab",
                     }}
                   />
-                </div>
+                </button>
                 {rotationIndicator ? (
                   <div
-                    className="pointer-events-none absolute z-40 -translate-x-1/2 rounded-md bg-slate-900/88 px-2 py-1 text-[10px] font-medium text-white"
+                    className="pointer-events-none absolute z-40 -translate-x-1/2 rounded-md border border-slate-700/70 bg-slate-950/90 px-2 py-1 text-[10px] font-semibold text-white shadow-[0_4px_14px_rgba(2,6,23,0.35)]"
                     style={{
                       left: rotationIndicator.left,
                       top: rotationIndicator.top,
@@ -1196,27 +1284,29 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
                     {Math.round(rotationIndicator.angle)}°
                   </div>
                 ) : null}
-                <div
-                  className="pointer-events-auto absolute"
+                <button
+                  type="button"
+                  aria-label="缩放形状"
+                  className="pointer-events-auto absolute rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:ring-offset-1 focus-visible:ring-offset-white active:scale-95"
                   style={{
                     right: -(HANDLE_HIT_SIZE / 2),
                     bottom: -(HANDLE_HIT_SIZE / 2),
                     width: HANDLE_HIT_SIZE,
                     height: HANDLE_HIT_SIZE,
+                    cursor: "nwse-resize",
                   }}
                   onPointerDown={beginResize}
                 >
                   <div
-                    className="absolute rounded-sm border border-white bg-sky-500 shadow-[0_0_0_1px_rgba(14,116,244,0.6)]"
+                    className="absolute rounded-[4px] border-2 border-white bg-sky-500 shadow-[0_8px_18px_rgba(14,116,244,0.35),0_0_0_1px_rgba(14,116,244,0.7)]"
                     style={{
                       right: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
                       bottom: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
                       width: RESIZE_HANDLE_SIZE,
                       height: RESIZE_HANDLE_SIZE,
-                      cursor: "nwse-resize",
                     }}
                   />
-                </div>
+                </button>
               </div>
             </div>,
             document.body,
@@ -1422,6 +1512,213 @@ function TableToolbar({
         >
           - 列
         </button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+type ShapeStyleToolbarProps = {
+  isMobile: boolean;
+  portalStyle: CSSProperties | null;
+  isLineLikeShape: boolean;
+  fillColor: string;
+  borderColor: string;
+  borderWidth: number;
+  borderStyle: "solid" | "dashed" | "dotted";
+  onFillColorChange: (color: string) => void;
+  onBorderStyleChange: (style: "solid" | "dashed" | "dotted") => void;
+  onBorderColorChange: (color: string) => void;
+  onBorderWidthChange: (width: number) => void;
+};
+
+function ShapeStyleToolbar({
+  isMobile,
+  portalStyle,
+  isLineLikeShape,
+  fillColor,
+  borderColor,
+  borderWidth,
+  borderStyle,
+  onFillColorChange,
+  onBorderStyleChange,
+  onBorderColorChange,
+  onBorderWidthChange,
+}: ShapeStyleToolbarProps) {
+  const [activePanel, setActivePanel] = useState<"fill" | "border" | null>(null);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onPointerDownOutside = (event: PointerEvent) => {
+      if (!toolbarRef.current) {
+        return;
+      }
+
+      if (!toolbarRef.current.contains(event.target as Node)) {
+        setActivePanel(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", onPointerDownOutside);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDownOutside);
+    };
+  }, []);
+
+  if (!portalStyle || typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div data-shape-toolbar="true" style={portalStyle} onPointerDown={(event) => event.stopPropagation()}>
+      <div ref={toolbarRef} className="relative">
+        <div
+          className={`flex items-center rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "gap-1 px-1.5 py-1" : "min-w-max gap-2 px-2 py-1.5"}`}
+        >
+          <button
+            type="button"
+            className="flex h-8 cursor-pointer items-center gap-2 rounded-lg px-3 text-sm font-medium text-slate-800 transition-colors duration-200 hover:bg-slate-100"
+          >
+            <span className="grid h-6 w-6 place-items-center rounded-full bg-slate-900 text-white">
+              <Sparkles className="h-3.5 w-3.5" />
+            </span>
+            Ask AI
+          </button>
+          <div className="h-6 w-px bg-slate-200" />
+
+          {!isLineLikeShape ? (
+            <div className="relative">
+              <button
+                type="button"
+                className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-slate-700 transition-colors duration-200 hover:bg-slate-100"
+                onClick={() => setActivePanel((current) => (current === "fill" ? null : "fill"))}
+                aria-label="填充颜色"
+              >
+                <span
+                  className="h-5 w-5 rounded-full border border-slate-300"
+                  style={{ backgroundColor: fillColor }}
+                />
+                <ChevronDown
+                  className={`h-4 w-4 text-slate-600 transition-transform ${activePanel === "fill" ? "rotate-180" : ""}`}
+                />
+              </button>
+
+              {activePanel === "fill" ? (
+                <div className="absolute left-0 top-[calc(100%+12px)] z-30 w-[252px] rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+                  <p className="mb-2 text-xs font-medium text-slate-500">填充颜色</p>
+                  <div className="grid grid-cols-6 gap-2">
+                    {SHAPE_FILL_OPTIONS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        className="h-8 w-8 rounded-full border border-slate-200"
+                        style={{
+                          backgroundColor: color,
+                          boxShadow:
+                            color === fillColor ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
+                        }}
+                        onClick={() => onFillColorChange(color)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="relative">
+            <button
+              type="button"
+              className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-slate-700 transition-colors duration-200 hover:bg-slate-100"
+              onClick={() => setActivePanel((current) => (current === "border" ? null : "border"))}
+              aria-label="边框样式"
+            >
+              <AlignJustify className="h-4 w-4" />
+              <ChevronDown
+                className={`h-4 w-4 text-slate-600 transition-transform ${activePanel === "border" ? "rotate-180" : ""}`}
+              />
+            </button>
+
+            {activePanel === "border" ? (
+              <div className="absolute right-0 top-[calc(100%+12px)] z-30 w-[320px] rounded-2xl border border-slate-300 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+                <p className="mb-3 text-sm font-medium text-slate-700">边框</p>
+
+                <div className="mb-3 grid grid-cols-3 gap-2">
+                  {BORDER_STYLE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors duration-200 ${
+                        borderStyle === option.value
+                          ? "border-sky-300 bg-sky-50 text-sky-700"
+                          : "border-slate-200 text-slate-600 hover:bg-slate-100"
+                      }`}
+                      onClick={() => onBorderStyleChange(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mb-4 flex items-center gap-2">
+                  <span className="text-xs font-medium text-slate-500">粗细</span>
+                  <div className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-300 bg-white px-1">
+                    <button
+                      type="button"
+                      className="grid h-6 w-6 place-items-center rounded-md text-slate-600 transition-colors duration-200 hover:bg-slate-100"
+                      onClick={() => onBorderWidthChange(Math.max(0, borderWidth - 1))}
+                      aria-label="减小边框粗细"
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </button>
+                    <span className="min-w-8 text-center text-xs font-semibold text-slate-800">
+                      {borderWidth}
+                    </span>
+                    <button
+                      type="button"
+                      className="grid h-6 w-6 place-items-center rounded-md text-slate-600 transition-colors duration-200 hover:bg-slate-100"
+                      onClick={() => onBorderWidthChange(Math.min(24, borderWidth + 1))}
+                      aria-label="增加边框粗细"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <p className="mb-2 text-sm text-slate-500">边框颜色</p>
+                <div className="grid grid-cols-6 gap-2">
+                  {SHAPE_BORDER_OPTIONS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      className="h-8 w-8 rounded-full border border-slate-200"
+                      style={{
+                        backgroundColor: color,
+                        boxShadow:
+                          color === borderColor ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
+                      }}
+                      onClick={() => onBorderColorChange(color)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="h-6 w-px bg-slate-200" />
+          <button
+            type="button"
+            className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-700 transition-colors duration-200 hover:bg-slate-100"
+          >
+            <Palette className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-700 transition-colors duration-200 hover:bg-slate-100"
+          >
+            <BrushCleaning className="h-4 w-4" />
+          </button>
+        </div>
       </div>
     </div>,
     document.body,

@@ -51,7 +51,7 @@ export function SlideViewport({ slideIndex = DEFAULT_SLIDE_INDEX }: { slideIndex
         return;
       }
 
-      if (targetElement?.closest("[data-shape-toolbar='true']")) {
+      if (targetElement?.closest("[data-shape-toolbar='true'], [data-shape-controls='true']")) {
         return;
       }
 

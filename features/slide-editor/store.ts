@@ -24,6 +24,7 @@ const DEFAULT_TABLE_COLUMNS = 3;
 const HISTORY_LIMIT = 100;
 
 type InsertShapeType = "rect" | "ellipse" | "line" | "arrow";
+type BorderLineStyle = "solid" | "dashed" | "dotted";
 
 type EditableSlideShape = {
   id: string;
@@ -56,6 +57,10 @@ type SlideEditorState = {
   updateShapeSize: (shapeId: string, width: number, height: number) => void;
   updateShapeRotation: (shapeId: string, rotation: number) => void;
   updateShapeContent: (shapeId: string, contentHtml: string, contentNode?: XmlValue) => void;
+  updateShapeFillColor: (shapeId: string, color: string) => void;
+  updateShapeBorderStyle: (shapeId: string, style: BorderLineStyle) => void;
+  updateShapeBorderColor: (shapeId: string, color: string) => void;
+  updateShapeBorderWidth: (shapeId: string, width: number) => void;
   updateTableCell: (shapeId: string, rowIndex: number, colIndex: number, text: string) => void;
   addTableRow: (shapeId: string) => void;
   removeTableRow: (shapeId: string) => void;
@@ -124,6 +129,14 @@ function updateShape(
 
     return updater(shape);
   });
+}
+
+function toXmlObject(value: XmlValue | undefined): XmlNode {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return { ...(value as XmlNode) };
 }
 
 function createId(prefix: string): string {
@@ -460,6 +473,91 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
           content: contentNode ?? shape.rawNode.content,
         },
       })),
+    }));
+  },
+  updateShapeFillColor: (shapeId, color) => {
+    set((state) => ({
+      shapes: updateShape(state.shapes, shapeId, (shape) => {
+        const fillNode = toXmlObject(shape.rawNode.fill);
+        const fillColorNode = toXmlObject(fillNode.fillColor as XmlValue | undefined);
+
+        return {
+          ...shape,
+          rawNode: {
+            ...shape.rawNode,
+            fill: {
+              ...fillNode,
+              fillColor: {
+                ...fillColorNode,
+                "@_color": color,
+              },
+            },
+          },
+        };
+      }),
+    }));
+  },
+  updateShapeBorderStyle: (shapeId, style) => {
+    set((state) => ({
+      shapes: updateShape(state.shapes, shapeId, (shape) => {
+        const borderNode = toXmlObject(shape.rawNode.border);
+        const hasColor = typeof borderNode["@_color"] === "string";
+        const hasWidth = Number.isFinite(Number(borderNode["@_width"]));
+
+        return {
+          ...shape,
+          rawNode: {
+            ...shape.rawNode,
+            border: {
+              "@_color": hasColor ? borderNode["@_color"] : "rgba(31, 35, 41, 1)",
+              "@_width": hasWidth ? Number(borderNode["@_width"]) : 1,
+              ...borderNode,
+              "@_style": style,
+            },
+          },
+        };
+      }),
+    }));
+  },
+  updateShapeBorderColor: (shapeId, color) => {
+    set((state) => ({
+      shapes: updateShape(state.shapes, shapeId, (shape) => {
+        const borderNode = toXmlObject(shape.rawNode.border);
+        const hasWidth = Number.isFinite(Number(borderNode["@_width"]));
+
+        return {
+          ...shape,
+          rawNode: {
+            ...shape.rawNode,
+            border: {
+              "@_width": hasWidth ? Number(borderNode["@_width"]) : 1,
+              ...borderNode,
+              "@_color": color,
+            },
+          },
+        };
+      }),
+    }));
+  },
+  updateShapeBorderWidth: (shapeId, width) => {
+    const normalizedWidth = round2(clamp(width, 0, 24));
+    set((state) => ({
+      shapes: updateShape(state.shapes, shapeId, (shape) => {
+        const borderNode = toXmlObject(shape.rawNode.border);
+        const hasColor = typeof borderNode["@_color"] === "string";
+
+        return {
+          ...shape,
+          rawNode: {
+            ...shape.rawNode,
+            border: {
+              "@_color": hasColor ? borderNode["@_color"] : "rgba(31, 35, 41, 1)",
+              ...borderNode,
+              "@_width": normalizedWidth,
+            },
+          },
+        };
+      }),
     }));
   },
   updateTableCell: (shapeId, rowIndex, colIndex, text) => {
