@@ -12,6 +12,7 @@ import type { SlideShapeModel, TableModel, XmlNode, XmlValue } from "@/lib/slide
 
 const RESIZE_HANDLE_SIZE = 10;
 const HANDLE_HIT_SIZE = 32;
+const TEXT_DRAG_EDGE_SIZE = 14;
 const ROTATION_SNAP_DEGREES = 15;
 const ROTATE_HANDLE_OFFSET = 28;
 const TOOLBAR_GAP = 12;
@@ -590,6 +591,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   );
   const isSelected = isInteractive && selectedShapeId === shapeId;
   const isEditing = isInteractive && editingShapeId === shapeId;
+  const isDraggableTextShape = isInteractive && hasRichTextContent && isSelected && !isEditing;
   const [textStyle, setTextStyle] = useState<TextStyleState>({
     fontFamily: FONT_OPTIONS[0],
     fontSize: 16,
@@ -771,10 +773,6 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   );
 
   const beginDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (isEditing) {
-      return;
-    }
-
     event.preventDefault();
     event.stopPropagation();
     captureHistorySnapshot();
@@ -895,6 +893,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         width: toPercent(shape.attributes.width, 960),
         height: toPercent(shape.attributes.height, 540),
         zIndex: "zIndex" in shape ? shape.zIndex : undefined,
+        cursor: isDraggableTextShape ? "move" : undefined,
       }}
       onPointerDown={isInteractive ? beginDrag : undefined}
     >
@@ -944,7 +943,9 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
               if (!isInteractive) {
                 return;
               }
-              event.stopPropagation();
+              if (isEditing) {
+                event.stopPropagation();
+              }
               selectShape(shapeId);
             }}
             onDoubleClick={(event) => {
@@ -988,13 +989,19 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
             ref={editableRef}
             className="h-full w-full"
             contentEditable={isInteractive && isEditing}
+            style={{ cursor: isDraggableTextShape ? "move" : undefined }}
             suppressContentEditableWarning
             onPointerDown={(event) => {
               if (!isInteractive) {
                 return;
               }
-              event.stopPropagation();
-              selectShape(shapeId);
+              if (isEditing) {
+                event.stopPropagation();
+                selectShape(shapeId);
+                return;
+              }
+
+              beginDrag(event);
             }}
             onClick={(event) => {
               if (!isInteractive) {
@@ -1158,6 +1165,31 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
             />
           </div>
         </div>
+      ) : null}
+
+      {isSelected && isEditing && hasRichTextContent ? (
+        <>
+          <div
+            className="absolute z-20"
+            style={{ left: 0, top: -TEXT_DRAG_EDGE_SIZE / 2, width: "100%", height: TEXT_DRAG_EDGE_SIZE, cursor: "move" }}
+            onPointerDown={beginDrag}
+          />
+          <div
+            className="absolute z-20"
+            style={{ right: -TEXT_DRAG_EDGE_SIZE / 2, top: 0, width: TEXT_DRAG_EDGE_SIZE, height: "100%", cursor: "move" }}
+            onPointerDown={beginDrag}
+          />
+          <div
+            className="absolute z-20"
+            style={{ left: 0, bottom: -TEXT_DRAG_EDGE_SIZE / 2, width: "100%", height: TEXT_DRAG_EDGE_SIZE, cursor: "move" }}
+            onPointerDown={beginDrag}
+          />
+          <div
+            className="absolute z-20"
+            style={{ left: -TEXT_DRAG_EDGE_SIZE / 2, top: 0, width: TEXT_DRAG_EDGE_SIZE, height: "100%", cursor: "move" }}
+            onPointerDown={beginDrag}
+          />
+        </>
       ) : null}
     </div>
   );
