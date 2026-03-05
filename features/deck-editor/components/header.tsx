@@ -4,26 +4,37 @@ import Link from "next/link";
 import Image from "next/image";
 import { UserButton } from "@clerk/nextjs";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import {
-  ArrowLeft,
-  Check,
-  ChevronDown,
-  Download,
-  Expand,
-  Loader2,
-  Play,
-  RefreshCw,
-  X,
-} from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Eye, EyeOff, History, Loader2, Save, X } from "lucide-react";
 
 type HeaderProps = {
   title: string;
   onTitleSave?: (nextTitle: string) => Promise<boolean>;
   backHref?: string;
   showLogo?: boolean;
+  onSave?: () => void;
+  onOpenHistory?: () => void;
+  onTogglePreview?: () => void;
+  isSaving?: boolean;
+  saveStatus?: "idle" | "success" | "error" | "conflict";
+  isDirty?: boolean;
+  isPreviewMode?: boolean;
+  disableSave?: boolean;
 };
 
-export function Header({ title, onTitleSave, backHref, showLogo = true }: HeaderProps) {
+export function Header({
+  title,
+  onTitleSave,
+  backHref,
+  showLogo = true,
+  onSave,
+  onOpenHistory,
+  onTogglePreview,
+  isSaving = false,
+  saveStatus = "idle",
+  isDirty = false,
+  isPreviewMode = false,
+  disableSave = false,
+}: HeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
   const [isSavingTitle, setIsSavingTitle] = useState(false);
@@ -106,6 +117,17 @@ export function Header({ title, onTitleSave, backHref, showLogo = true }: Header
     }
   };
 
+  const saveStatusPillText =
+    saveStatus === "conflict"
+      ? "版本冲突"
+      : saveStatus === "error"
+        ? "保存失败"
+        : isSaving
+          ? "保存中..."
+          : isDirty
+            ? "未保存变更"
+            : "已同步";
+
   return (
     <header className="flex h-20 items-center justify-between border-b border-slate-200 bg-white px-6">
       <div className="flex items-center">
@@ -162,48 +184,62 @@ export function Header({ title, onTitleSave, backHref, showLogo = true }: Header
 
       <div className="flex-1" />
 
-      <div className="flex items-center gap-1.5 text-slate-600">
-        <button
-          type="button"
-          className="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white/90 px-3 text-xs font-medium text-slate-700 shadow-[0_1px_4px_rgba(15,23,42,0.04)] transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+      <div className="flex items-center gap-2.5 text-slate-600">
+        <div
+          className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
+            saveStatus === "conflict" || saveStatus === "error"
+              ? "border-rose-200 bg-rose-50 text-rose-700"
+              : saveStatus === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : isDirty
+                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                  : "border-slate-200 bg-slate-50 text-slate-600"
+          }`}
         >
-          最新版本
-          <ChevronDown className="h-3.5 w-3.5" />
-        </button>
+          {isSaving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : saveStatus === "success" ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : saveStatus === "error" || saveStatus === "conflict" ? (
+            <CircleAlert className="h-3.5 w-3.5" />
+          ) : null}
+          <span>{saveStatusPillText}</span>
+        </div>
 
-        <button
-          type="button"
-          className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100/80 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
-          aria-label="历史记录"
-        >
-          <RefreshCw className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100/80 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
-          aria-label="播放"
-        >
-          <Play className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100/80 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
-          aria-label="下载"
-        >
-          <Download className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1.5 rounded-xl border border-slate-200/90 bg-white/95 px-1.5 py-1 shadow-[0_1px_6px_rgba(15,23,42,0.05)]">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={isSaving || disableSave}
+            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-medium text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            保存
+          </button>
+          <button
+            type="button"
+            onClick={onOpenHistory}
+            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+          >
+            <History className="h-3.5 w-3.5" />
+            历史版本
+          </button>
+          <button
+            type="button"
+            onClick={onTogglePreview}
+            className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${
+              isPreviewMode ? "bg-sky-50 text-sky-700 hover:bg-sky-100/80" : "text-slate-700 hover:bg-slate-100/80"
+            }`}
+          >
+            {isPreviewMode ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {isPreviewMode ? "退出预览" : "预览"}
+          </button>
+        </div>
 
-        <div className="mx-1 h-5 w-px bg-slate-200" />
-
-        <button
-          type="button"
-          className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-500 transition-colors duration-200 hover:bg-slate-100/80 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
-          aria-label="全屏"
-        >
-          <Expand className="h-4 w-4" />
-        </button>
-        <div className="ml-1 rounded-lg border border-slate-200 bg-white p-1 shadow-[0_1px_4px_rgba(15,23,42,0.05)]">
-          <UserButton />
+        <div className="ml-1 shrink-0 rounded-xl border border-slate-200 bg-white p-0.5 shadow-[0_1px_4px_rgba(15,23,42,0.05)]">
+          <div className="grid h-8 w-8 place-items-center overflow-hidden rounded-lg">
+            <UserButton />
+          </div>
         </div>
       </div>
     </header>

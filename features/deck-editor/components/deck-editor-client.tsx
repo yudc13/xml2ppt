@@ -4,16 +4,9 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowUpToLine,
-  CircleAlert,
-  Check,
   ChevronDown,
-  Eye,
-  EyeOff,
-  History,
-  Loader2,
   Palette,
   RotateCcw,
-  Save,
   Shapes,
   Sparkles,
   Table2,
@@ -52,6 +45,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sheet,
   SheetContent,
@@ -80,6 +74,7 @@ export function DeckEditorClient({
   const currentSlideIndexInStore = useSlideEditorStore((state) => state.currentSlideIndex);
   const storeShapes = useSlideEditorStore((state) => state.shapes);
   const setPreviewMode = useSlideEditorStore((state) => state.setPreviewMode);
+  const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
   const updateDeckTitle = useUpdateDeckTitle(deckId);
   const createSlide = useCreateSlide(deckId);
   const saveSlide = useSaveSlide();
@@ -372,6 +367,14 @@ export function DeckEditorClient({
             return false;
           }
         }}
+        onSave={handleManualSave}
+        onOpenHistory={handleOpenHistory}
+        onTogglePreview={() => setPreviewMode(!isPreviewMode)}
+        isSaving={saveSlide.isPending}
+        saveStatus={saveStatus}
+        isDirty={isDirty}
+        isPreviewMode={isPreviewMode}
+        disableSave={previewRevisionVersion !== null}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -390,14 +393,11 @@ export function DeckEditorClient({
               <Toolbar
                 zoom={zoom}
                 onZoomChange={setZoom}
-                onSave={handleManualSave}
-                isSaving={saveSlide.isPending}
                 saveStatus={saveStatus}
                 isDirty={isDirty}
                 lastSavedAt={lastSavedAt}
                 isHistoryOpen={isHistoryOpen}
                 onHistoryOpenChange={setIsHistoryOpen}
-                onOpenHistory={handleOpenHistory}
                 revisions={revisions}
                 isLoadingRevisions={loadRevisions.isPending}
                 revisionError={revisionError}
@@ -439,14 +439,11 @@ function CollapsedSidebarTrigger() {
 function Toolbar({
   zoom,
   onZoomChange,
-  onSave,
-  isSaving,
   saveStatus,
   isDirty,
   lastSavedAt,
   isHistoryOpen,
   onHistoryOpenChange,
-  onOpenHistory,
   revisions,
   isLoadingRevisions,
   revisionError,
@@ -459,14 +456,11 @@ function Toolbar({
 }: {
   zoom: number;
   onZoomChange: (nextZoom: number) => void;
-  onSave: () => void;
-  isSaving: boolean;
   saveStatus: SaveStatus;
   isDirty: boolean;
   lastSavedAt: string | null;
   isHistoryOpen: boolean;
   onHistoryOpenChange: (open: boolean) => void;
-  onOpenHistory: () => void;
   revisions: SlideRevisionEntity[];
   isLoadingRevisions: boolean;
   revisionError: string | null;
@@ -484,7 +478,6 @@ function Toolbar({
   const insertShape = useSlideEditorStore((state) => state.insertShape);
   const insertTable = useSlideEditorStore((state) => state.insertTable);
   const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
-  const setPreviewMode = useSlideEditorStore((state) => state.setPreviewMode);
   const copySelectedShape = useSlideEditorStore((state) => state.copySelectedShape);
   const pasteCopiedShape = useSlideEditorStore((state) => state.pasteCopiedShape);
   const deleteSelectedShape = useSlideEditorStore((state) => state.deleteSelectedShape);
@@ -548,17 +541,6 @@ function Toolbar({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [copySelectedShape, deleteSelectedShape, isPreviewMode, pasteCopiedShape, redo, undo]);
 
-  const saveStatusText =
-    saveStatus === "conflict"
-      ? "版本冲突"
-      : saveStatus === "error"
-        ? "保存失败"
-        : isSaving
-          ? "保存中..."
-          : saveStatus === "success"
-            ? "已保存"
-            : "保存";
-
   return (
     <div data-editor-toolbar="true" className="max-w-full overflow-x-auto">
       <div className="mb-2 text-center text-xs text-slate-500">
@@ -620,43 +602,6 @@ function Toolbar({
         <ToolbarButton icon={<Palette className="h-4 w-4" />} label="格式" />
         <button
           type="button"
-          onClick={onSave}
-          disabled={isSaving || isPreviewingRevision}
-          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
-        >
-          {isSaving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : saveStatus === "success" ? (
-            <Check className="h-4 w-4 text-emerald-600" />
-          ) : saveStatus === "error" || saveStatus === "conflict" ? (
-            <CircleAlert className="h-4 w-4 text-rose-600" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
-          <span className="hidden md:inline">{saveStatusText}</span>
-        </button>
-        <button
-          type="button"
-          onClick={onOpenHistory}
-          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
-        >
-          <History className="h-4 w-4" />
-          <span className="hidden md:inline">历史版本</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setPreviewMode(!isPreviewMode)}
-          className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 ${
-            isPreviewMode
-              ? "bg-sky-50 text-sky-700 hover:bg-sky-100/80"
-              : "text-slate-700 hover:bg-slate-100/80"
-          }`}
-        >
-          {isPreviewMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          <span className="hidden md:inline">{isPreviewMode ? "退出预览" : "预览"}</span>
-        </button>
-        <button
-          type="button"
           disabled={!selectedShapeId}
           onClick={bringToFront}
           className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
@@ -709,7 +654,21 @@ function Toolbar({
           <ScrollArea className="flex-1">
             <div className="space-y-2 p-4">
               {isLoadingRevisions ? (
-                <div className="text-sm text-slate-500">正在加载版本列表...</div>
+                <div className="space-y-2">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <div key={`revision-skeleton-${index}`} className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <Skeleton className="h-5 w-10 rounded-md" />
+                        <Skeleton className="h-5 w-12 rounded-md" />
+                      </div>
+                      <Skeleton className="mb-3 h-4 w-40 rounded-md" />
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-7 w-14 rounded-lg" />
+                        <Skeleton className="h-7 w-14 rounded-lg" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : revisionError ? (
                 <div className="text-sm text-rose-600">{revisionError}</div>
               ) : revisions.length === 0 ? (
