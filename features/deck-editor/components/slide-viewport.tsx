@@ -37,6 +37,7 @@ export function SlideViewport({
   const currentSlideIndex = useSlideEditorStore((state) => state.currentSlideIndex);
   const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
   const storedShapes = useSlideEditorStore((state) => state.shapes);
+  const snapGuides = useSlideEditorStore((state) => state.snapGuides);
   const interactiveShapes = useMemo(
     () => [...storedShapes].sort((a, b) => a.zIndex - b.zIndex),
     [storedShapes],
@@ -92,6 +93,7 @@ export function SlideViewport({
               if (event.target === event.currentTarget) {
                 if (!isPreviewMode) {
                   selectShape(null);
+                  setEditingShape(null);
                 }
               }
             }}
@@ -108,6 +110,18 @@ export function SlideViewport({
               : model.shapes.map((shape) => (
                   <SlideShape key={shape.attributes.id} shape={shape} />
                 ))}
+            {interactiveEnabled && snapGuides.vertical !== null ? (
+              <div
+                className="pointer-events-none absolute top-0 z-[10020] h-full w-px bg-sky-500/80"
+                style={{ left: `${(snapGuides.vertical / 960) * 100}%` }}
+              />
+            ) : null}
+            {interactiveEnabled && snapGuides.horizontal !== null ? (
+              <div
+                className="pointer-events-none absolute left-0 z-[10020] h-px w-full bg-sky-500/80"
+                style={{ top: `${(snapGuides.horizontal / 540) * 100}%` }}
+              />
+            ) : null}
           </div>
         </div>
       </div>

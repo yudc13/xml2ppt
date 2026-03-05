@@ -60,6 +60,7 @@ const DEFAULT_ZOOM = 65;
 const MIN_ZOOM = 25;
 const MAX_ZOOM = 200;
 const ZOOM_STEP = 5;
+const TABLE_GRID_MAX = 10;
 
 export function DeckEditorClient({
   deckId,
@@ -590,12 +591,7 @@ function Toolbar({
             { label: "单向箭头", onClick: () => insertShape("arrow") },
           ]}
         />
-        <ToolbarMenu
-          icon={<Table2 className="h-4 w-4" />}
-          label="表格"
-          disabled={isPreviewMode}
-          items={[{ label: "插入 3 x 3 表格", onClick: () => insertTable(3, 3) }]}
-        />
+        <TableInsertGridMenu disabled={isPreviewMode} onInsert={insertTable} />
 
         <div className="mx-1.5 h-6 w-px bg-slate-200" />
 
@@ -778,6 +774,84 @@ function ToolbarMenu({
             {item.label}
           </DropdownMenuItem>
         ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function TableInsertGridMenu({
+  onInsert,
+  disabled,
+}: {
+  onInsert: (rows: number, columns: number) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hoverRows, setHoverRows] = useState(1);
+  const [hoverColumns, setHoverColumns] = useState(1);
+
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) {
+          setHoverRows(1);
+          setHoverColumns(1);
+        }
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
+        >
+          <Table2 className="h-4 w-4" />
+          <span className="hidden md:inline">表格</span>
+          <ChevronDown className="hidden h-3.5 w-3.5 md:block" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-[220px] p-3">
+        <div className="mb-2 text-xs font-medium text-slate-700">插入表格</div>
+        <div
+          className="grid grid-cols-10 gap-1"
+          onMouseLeave={() => {
+            setHoverRows(1);
+            setHoverColumns(1);
+          }}
+        >
+          {Array.from({ length: TABLE_GRID_MAX }).map((_, rowIndex) =>
+            Array.from({ length: TABLE_GRID_MAX }).map((__, colIndex) => {
+              const rows = rowIndex + 1;
+              const columns = colIndex + 1;
+              const isSelected = rowIndex < hoverRows && colIndex < hoverColumns;
+
+              return (
+                <button
+                  key={`table-grid-${rows}-${columns}`}
+                  type="button"
+                  className={`h-3.5 w-3.5 rounded-[3px] border transition-colors ${
+                    isSelected
+                      ? "border-sky-500 bg-sky-400/80"
+                      : "border-slate-300 bg-slate-100 hover:border-slate-400 hover:bg-slate-200"
+                  }`}
+                  onMouseEnter={() => {
+                    setHoverRows(rows);
+                    setHoverColumns(columns);
+                  }}
+                  onClick={() => {
+                    onInsert(rows, columns);
+                    setOpen(false);
+                  }}
+                />
+              );
+            }),
+          )}
+        </div>
+        <div className="mt-2 text-center text-xs text-slate-500">
+          {hoverRows} x {hoverColumns}
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

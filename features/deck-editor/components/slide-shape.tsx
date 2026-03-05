@@ -28,6 +28,7 @@ const TOOLBAR_GAP = 12;
 const HANDLE_EDGE_THRESHOLD = 40;
 const SLIDE_BASE_WIDTH = 960;
 const SLIDE_BASE_HEIGHT = 540;
+const SNAP_THRESHOLD = 6;
 const CONTROL_OVERLAY_Z_INDEX = 10_000;
 const TOOLBAR_PORTAL_Z_INDEX = 10_100;
 
@@ -648,11 +649,14 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const updateShapeBorderColor = useSlideEditorStore((state) => state.updateShapeBorderColor);
   const updateShapeBorderWidth = useSlideEditorStore((state) => state.updateShapeBorderWidth);
   const updateTableCell = useSlideEditorStore((state) => state.updateTableCell);
-  const addTableRow = useSlideEditorStore((state) => state.addTableRow);
-  const removeTableRow = useSlideEditorStore((state) => state.removeTableRow);
-  const addTableColumn = useSlideEditorStore((state) => state.addTableColumn);
-  const removeTableColumn = useSlideEditorStore((state) => state.removeTableColumn);
+  const insertTableRowAt = useSlideEditorStore((state) => state.insertTableRowAt);
+  const removeTableRowAt = useSlideEditorStore((state) => state.removeTableRowAt);
+  const insertTableColumnAt = useSlideEditorStore((state) => state.insertTableColumnAt);
+  const removeTableColumnAt = useSlideEditorStore((state) => state.removeTableColumnAt);
   const captureHistorySnapshot = useSlideEditorStore((state) => state.captureHistorySnapshot);
+  const allShapes = useSlideEditorStore((state) => state.shapes);
+  const setSnapGuides = useSlideEditorStore((state) => state.setSnapGuides);
+  const clearSnapGuides = useSlideEditorStore((state) => state.clearSnapGuides);
 
   const editableRef = useRef<HTMLDivElement | null>(null);
   const shapeRef = useRef<HTMLDivElement | null>(null);
@@ -711,6 +715,17 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const [viewportRect, setViewportRect] = useState<DOMRect | null>(null);
   const draftTextStyleRef = useRef<TextStyleState | null>(null);
   const savedCollapsedRangeRef = useRef<Range | null>(null);
+  const tableCellRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const composingTableCellIdRef = useRef<string | null>(null);
+  const [activeTableCell, setActiveTableCell] = useState<{ rowIndex: number; colIndex: number } | null>(null);
+  const hasActiveTableCell = activeTableCell !== null;
+  const [hoverTableCell, setHoverTableCell] = useState<{ rowIndex: number; colIndex: number } | null>(null);
+  const tableRowCount = tableModel?.rows.length ?? 1;
+  const tableColCount = tableModel?.rows[0]?.cells.length ?? 1;
+  const activeRowIndex = Math.min(activeTableCell?.rowIndex ?? 0, Math.max(0, tableRowCount - 1));
+  const activeColIndex = Math.min(activeTableCell?.colIndex ?? 0, Math.max(0, tableColCount - 1));
+  const hoverRowIndex = Math.min(hoverTableCell?.rowIndex ?? -1, Math.max(0, tableRowCount - 1));
+  const hoverColIndex = Math.min(hoverTableCell?.colIndex ?? -1, Math.max(0, tableColCount - 1));
   const currentRotation = shape.attributes.rotation ?? 0;
   const rotateHandleOnTop = useMemo(() => {
     const spaceAbove = shape.attributes.topLeftY;
@@ -925,6 +940,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     event.preventDefault();
     event.stopPropagation();
     captureHistorySnapshot();
+    setEditingShape(null);
     selectShape(shapeId);
 
     const viewportElement = viewportRef?.current;
@@ -937,14 +953,70 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     const originY = event.clientY;
     const startX = shape.attributes.topLeftX;
     const startY = shape.attributes.topLeftY;
+    const movingWidth = shape.attributes.width;
+    const movingHeight = shape.attributes.height;
+    const otherShapes = allShapes.filter((item) => item.id !== shapeId);
+    clearSnapGuides();
+
+    const getSnappedAxis = (
+      proposedStart: number,
+      size: number,
+      targets: number[],
+    ): { position: number; guide: number | null } => {
+      const movingPoints = [
+        { offset: 0, value: proposedStart },
+        { offset: size / 2, value: proposedStart + size / 2 },
+        { offset: size, value: proposedStart + size },
+      ];
+
+      let bestDiff = Number.POSITIVE_INFINITY;
+      let snappedPosition = proposedStart;
+      let guide: number | null = null;
+
+      for (const target of targets) {
+        for (const point of movingPoints) {
+          const diff = target - point.value;
+          const distance = Math.abs(diff);
+          if (distance <= SNAP_THRESHOLD && distance < bestDiff) {
+            bestDiff = distance;
+            snappedPosition = proposedStart + diff;
+            guide = target;
+          }
+        }
+      }
+
+      return { position: snappedPosition, guide };
+    };
 
     const onMove = (moveEvent: PointerEvent) => {
       const deltaX = ((moveEvent.clientX - originX) / rect.width) * 960;
       const deltaY = ((moveEvent.clientY - originY) / rect.height) * 540;
-      updateShapePosition(shapeId, startX + deltaX, startY + deltaY);
+      const proposedX = startX + deltaX;
+      const proposedY = startY + deltaY;
+
+      const verticalTargets = otherShapes.flatMap((item) => [
+        item.attributes.topLeftX,
+        item.attributes.topLeftX + item.attributes.width / 2,
+        item.attributes.topLeftX + item.attributes.width,
+      ]);
+      const horizontalTargets = otherShapes.flatMap((item) => [
+        item.attributes.topLeftY,
+        item.attributes.topLeftY + item.attributes.height / 2,
+        item.attributes.topLeftY + item.attributes.height,
+      ]);
+
+      const snappedX = getSnappedAxis(proposedX, movingWidth, verticalTargets);
+      const snappedY = getSnappedAxis(proposedY, movingHeight, horizontalTargets);
+
+      setSnapGuides({
+        vertical: snappedX.guide,
+        horizontal: snappedY.guide,
+      });
+      updateShapePosition(shapeId, snappedX.position, snappedY.position);
     };
 
     const onUp = () => {
+      clearSnapGuides();
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
@@ -1094,7 +1166,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
           </svg>
         ) : isTableShape ? (
           <div
-            className="h-full w-full bg-white"
+            className="h-full w-full rounded-[calc(var(--slide-unit)*6)] bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-[calc(var(--slide-unit)*4)]"
             onPointerDown={(event) => {
               if (!isInteractive) {
                 return;
@@ -1112,28 +1184,117 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
               setEditingShape(shapeId);
             }}
           >
-            <table className="h-full w-full table-fixed border-collapse">
+            <table
+              className="h-full w-full table-fixed overflow-hidden rounded-[calc(var(--slide-unit)*4)] border border-slate-300/90 border-separate border-spacing-0 bg-white shadow-[0_1px_0_rgba(15,23,42,0.04)]"
+              onPointerLeave={() => {
+                setHoverTableCell(null);
+              }}
+            >
               <tbody>
                 {tableModel.rows.map((row, rowIndex) => (
                   <tr key={row.id}>
                     {row.cells.map((cell, cellIndex) => (
+                      (() => {
+                        const isActiveRow = isSelected && hasActiveTableCell && rowIndex === activeRowIndex;
+                        const isActiveCol = isSelected && hasActiveTableCell && cellIndex === activeColIndex;
+                        const isActiveCell = isActiveRow && isActiveCol;
+                        const isHoverRow = hoverTableCell !== null && rowIndex === hoverRowIndex;
+                        const isHoverCol = hoverTableCell !== null && cellIndex === hoverColIndex;
+                        const isHoverCell = isHoverRow && isHoverCol;
+                        const baseCellClass =
+                          rowIndex === 0
+                            ? "bg-[linear-gradient(180deg,#f8fbff_0%,#f1f5f9_100%)] font-semibold text-slate-800"
+                            : rowIndex % 2 === 0
+                              ? "bg-slate-50/30"
+                              : "bg-white";
+                        const hoverClass =
+                          !isActiveCell && (isHoverRow || isHoverCol)
+                            ? isHoverCell
+                              ? "bg-indigo-100/80"
+                              : isHoverRow
+                                ? "bg-indigo-50/60"
+                                : "bg-violet-50/60"
+                            : "";
+                        const activeClass = isActiveCell
+                          ? "bg-cyan-100/95 shadow-[inset_0_0_0_1px_rgba(14,116,244,0.7)]"
+                          : isActiveRow
+                            ? "bg-sky-100/80"
+                            : isActiveCol
+                              ? "bg-amber-100/75"
+                              : "";
+
+                        return (
                       <td
                         key={cell.id}
-                        className="border border-slate-300 align-top text-[calc(var(--slide-unit)*14)] text-slate-700"
+                        className={`relative overflow-hidden border-b border-r border-slate-300/80 align-middle text-center text-[calc(var(--slide-unit)*14)] text-slate-700 transition-colors duration-150 ${baseCellClass} ${hoverClass} ${activeClass}`}
+                        style={{
+                          borderRightWidth: cellIndex === row.cells.length - 1 ? 0 : undefined,
+                          borderBottomWidth: rowIndex === tableModel.rows.length - 1 ? 0 : undefined,
+                        }}
+                        onPointerEnter={() => {
+                          setHoverTableCell({ rowIndex, colIndex: cellIndex });
+                        }}
+                        onPointerDown={() => {
+                          setActiveTableCell({ rowIndex, colIndex: cellIndex });
+                        }}
                       >
+                        {isSelected && hasActiveTableCell && rowIndex === activeRowIndex && cellIndex === 0 ? (
+                          <div className="pointer-events-none absolute top-0 left-0 h-full w-[calc(var(--slide-unit)*2.5)] bg-sky-600/85" />
+                        ) : null}
+                        {isSelected && hasActiveTableCell && rowIndex === 0 && cellIndex === activeColIndex ? (
+                          <div className="pointer-events-none absolute top-0 left-0 h-[calc(var(--slide-unit)*2.5)] w-full bg-amber-500/85" />
+                        ) : null}
+                        {hoverTableCell !== null && rowIndex === hoverRowIndex && cellIndex === 0 ? (
+                          <div className="pointer-events-none absolute top-0 left-0 h-full w-[calc(var(--slide-unit)*1.5)] bg-indigo-400/55" />
+                        ) : null}
+                        {hoverTableCell !== null && rowIndex === 0 && cellIndex === hoverColIndex ? (
+                          <div className="pointer-events-none absolute top-0 left-0 h-[calc(var(--slide-unit)*1.5)] w-full bg-violet-400/60" />
+                        ) : null}
                         {isInteractive && isEditing ? (
-                          <textarea
-                            value={cell.text}
-                            className="h-full min-h-[calc(var(--slide-unit)*26)] w-full resize-none border-none bg-transparent px-2 py-1 text-[calc(var(--slide-unit)*14)] text-slate-700 outline-none"
+                          <div
+                            ref={(element) => {
+                              tableCellRefs.current[cell.id] = element;
+                              if (!element) {
+                                return;
+                              }
+
+                              const isFocused = document.activeElement === element;
+                              if (!isFocused && element.textContent !== cell.text) {
+                                element.textContent = cell.text;
+                              }
+                            }}
+                            className="flex h-full min-h-[calc(var(--slide-unit)*28)] w-full items-center justify-center rounded-[calc(var(--slide-unit)*2)] bg-transparent px-2 py-1 text-center text-[calc(var(--slide-unit)*14)] text-slate-700 outline-none ring-inset transition-shadow focus:bg-white focus:shadow-[inset_0_0_0_1px_rgba(14,116,244,0.5)]"
+                            contentEditable
+                            suppressContentEditableWarning
                             onPointerDown={(event) => event.stopPropagation()}
-                            onChange={(event) =>
-                              updateTableCell(shapeId, rowIndex, cellIndex, event.currentTarget.value)
-                            }
+                            onFocus={() => {
+                              setActiveTableCell({ rowIndex, colIndex: cellIndex });
+                            }}
+                            onCompositionStart={() => {
+                              composingTableCellIdRef.current = cell.id;
+                            }}
+                            onCompositionEnd={(event) => {
+                              composingTableCellIdRef.current = null;
+                              updateTableCell(shapeId, rowIndex, cellIndex, event.currentTarget.textContent ?? "");
+                            }}
+                            onInput={(event) => {
+                              if (composingTableCellIdRef.current === cell.id) {
+                                return;
+                              }
+                              updateTableCell(shapeId, rowIndex, cellIndex, event.currentTarget.textContent ?? "");
+                            }}
+                            onBlur={(event) => {
+                              updateTableCell(shapeId, rowIndex, cellIndex, event.currentTarget.textContent ?? "");
+                            }}
                           />
                         ) : (
-                          <div className="min-h-[calc(var(--slide-unit)*26)] px-2 py-1">{cell.text || "\u00A0"}</div>
+                          <div className="flex min-h-[calc(var(--slide-unit)*28)] items-center justify-center px-2 py-1 leading-tight">
+                            {cell.text || "\u00A0"}
+                          </div>
                         )}
                       </td>
+                        );
+                      })()
                     ))}
                   </tr>
                 ))}
@@ -1271,10 +1432,16 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         <TableToolbar
           isMobile={isMobile}
           portalStyle={toolbarPortalStyle}
-          onAddRow={() => addTableRow(shapeId)}
-          onRemoveRow={() => removeTableRow(shapeId)}
-          onAddColumn={() => addTableColumn(shapeId)}
-          onRemoveColumn={() => removeTableColumn(shapeId)}
+          activeRowIndex={activeRowIndex}
+          activeColIndex={activeColIndex}
+          rowCount={tableRowCount}
+          colCount={tableColCount}
+          onInsertRowAbove={() => insertTableRowAt(shapeId, activeRowIndex, "before")}
+          onInsertRowBelow={() => insertTableRowAt(shapeId, activeRowIndex, "after")}
+          onDeleteCurrentRow={() => removeTableRowAt(shapeId, activeRowIndex)}
+          onInsertColLeft={() => insertTableColumnAt(shapeId, activeColIndex, "before")}
+          onInsertColRight={() => insertTableColumnAt(shapeId, activeColIndex, "after")}
+          onDeleteCurrentCol={() => removeTableColumnAt(shapeId, activeColIndex)}
         />
       ) : null}
 
@@ -1555,19 +1722,31 @@ function TextFormatToolbar({
 type TableToolbarProps = {
   isMobile: boolean;
   portalStyle: CSSProperties | null;
-  onAddRow: () => void;
-  onRemoveRow: () => void;
-  onAddColumn: () => void;
-  onRemoveColumn: () => void;
+  activeRowIndex: number;
+  activeColIndex: number;
+  rowCount: number;
+  colCount: number;
+  onInsertRowAbove: () => void;
+  onInsertRowBelow: () => void;
+  onDeleteCurrentRow: () => void;
+  onInsertColLeft: () => void;
+  onInsertColRight: () => void;
+  onDeleteCurrentCol: () => void;
 };
 
 function TableToolbar({
   isMobile,
   portalStyle,
-  onAddRow,
-  onRemoveRow,
-  onAddColumn,
-  onRemoveColumn,
+  activeRowIndex,
+  activeColIndex,
+  rowCount,
+  colCount,
+  onInsertRowAbove,
+  onInsertRowBelow,
+  onDeleteCurrentRow,
+  onInsertColLeft,
+  onInsertColRight,
+  onDeleteCurrentCol,
 }: TableToolbarProps) {
   if (!portalStyle || typeof document === "undefined") {
     return null;
@@ -1576,36 +1755,65 @@ function TableToolbar({
   return createPortal(
     <div data-shape-toolbar="true" style={portalStyle} onPointerDown={(event) => event.stopPropagation()}>
       <div
-        className={`flex items-center gap-1 rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "px-1.5 py-1" : "px-2 py-1"}`}
+        className={`flex max-w-[min(92vw,860px)] flex-nowrap items-center gap-1 overflow-x-auto rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "px-1.5 py-1" : "px-2 py-1"}`}
       >
+        <div className="flex items-center gap-1">
+          <span
+            className={`whitespace-nowrap rounded-md border border-sky-200 bg-sky-50 text-sky-700 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          >
+            行 {activeRowIndex + 1}
+          </span>
+          <span
+            className={`whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 text-amber-700 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          >
+            列 {activeColIndex + 1}
+          </span>
+        </div>
+        <div className="h-4 w-px bg-slate-200" />
         <button
           type="button"
-          className={`rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          onClick={onAddRow}
+          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          onClick={onInsertRowAbove}
         >
-          + 行
+          上插行
         </button>
         <button
           type="button"
-          className={`rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          onClick={onRemoveRow}
+          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          onClick={onInsertRowBelow}
         >
-          - 行
+          下插行
+        </button>
+        <button
+          type="button"
+          disabled={rowCount <= 1}
+          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          onClick={onDeleteCurrentRow}
+        >
+          删当前行
         </button>
         <div className="h-4 w-px bg-slate-200" />
         <button
           type="button"
-          className={`rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          onClick={onAddColumn}
+          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          onClick={onInsertColLeft}
         >
-          + 列
+          左插列
         </button>
         <button
           type="button"
-          className={`rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          onClick={onRemoveColumn}
+          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          onClick={onInsertColRight}
         >
-          - 列
+          右插列
+        </button>
+        <button
+          type="button"
+          disabled={colCount <= 1}
+          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
+          onClick={onDeleteCurrentCol}
+        >
+          删当前列
         </button>
       </div>
     </div>,

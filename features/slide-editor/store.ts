@@ -21,10 +21,15 @@ const DEFAULT_LINE_WIDTH = 280;
 const DEFAULT_LINE_HEIGHT = 4;
 const DEFAULT_TABLE_ROWS = 3;
 const DEFAULT_TABLE_COLUMNS = 3;
+const MAX_TABLE_GRID_SIZE = 10;
 const HISTORY_LIMIT = 100;
 
 type InsertShapeType = "rect" | "ellipse" | "line" | "arrow";
 type BorderLineStyle = "solid" | "dashed" | "dotted";
+type SnapGuides = {
+  vertical: number | null;
+  horizontal: number | null;
+};
 
 type EditableSlideShape = {
   id: string;
@@ -49,6 +54,7 @@ type SlideEditorState = {
   clipboardShape: EditableSlideShape | null;
   selectedShapeId: string | null;
   editingShapeId: string | null;
+  snapGuides: SnapGuides;
   initializeSlide: (slideIndex: number, model: SlideDocumentModel) => void;
   selectShape: (shapeId: string | null) => void;
   setEditingShape: (shapeId: string | null) => void;
@@ -62,16 +68,18 @@ type SlideEditorState = {
   updateShapeBorderColor: (shapeId: string, color: string) => void;
   updateShapeBorderWidth: (shapeId: string, width: number) => void;
   updateTableCell: (shapeId: string, rowIndex: number, colIndex: number, text: string) => void;
-  addTableRow: (shapeId: string) => void;
-  removeTableRow: (shapeId: string) => void;
-  addTableColumn: (shapeId: string) => void;
-  removeTableColumn: (shapeId: string) => void;
+  insertTableRowAt: (shapeId: string, rowIndex: number, position: "before" | "after") => void;
+  removeTableRowAt: (shapeId: string, rowIndex: number) => void;
+  insertTableColumnAt: (shapeId: string, colIndex: number, position: "before" | "after") => void;
+  removeTableColumnAt: (shapeId: string, colIndex: number) => void;
   copySelectedShape: () => void;
   pasteCopiedShape: () => void;
   deleteSelectedShape: () => void;
   insertTextPreset: (preset: TextPresetType) => void;
   insertShape: (shapeType: InsertShapeType) => void;
   insertTable: (rows?: number, columns?: number) => void;
+  setSnapGuides: (guides: SnapGuides) => void;
+  clearSnapGuides: () => void;
   bringToFront: () => void;
   sendToBack: () => void;
   captureHistorySnapshot: () => void;
@@ -211,8 +219,8 @@ function buildTextPresetContentNode(preset: TextPresetType): XmlNode {
 }
 
 function buildDefaultTableModel(rows: number, columns: number): TableModel {
-  const safeRows = Math.max(1, rows);
-  const safeColumns = Math.max(1, columns);
+  const safeRows = Math.min(MAX_TABLE_GRID_SIZE, Math.max(1, rows));
+  const safeColumns = Math.min(MAX_TABLE_GRID_SIZE, Math.max(1, columns));
 
   return {
     rows: Array.from({ length: safeRows }, (_, rowIndex) => ({
@@ -384,6 +392,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
   clipboardShape: null,
   selectedShapeId: null,
   editingShapeId: null,
+  snapGuides: { vertical: null, horizontal: null },
   historyPast: [],
   historyFuture: [],
   initializeSlide: (slideIndex, model) => {
@@ -396,6 +405,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
         },
         selectedShapeId: null,
         editingShapeId: null,
+        snapGuides: { vertical: null, horizontal: null },
         historyPast: [],
         historyFuture: [],
         shapes: model.shapes.map((shape, index) => {
@@ -612,7 +622,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
       }),
     }));
   },
-  addTableRow: (shapeId) => {
+  insertTableRowAt: (shapeId, rowIndex, position) => {
     set((state) => ({
       shapes: updateShape(state.shapes, shapeId, (shape) => {
         if (shape.attributes.type !== "table") {
@@ -621,7 +631,9 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
 
         const tableModel = parseTableModel(shape.rawNode.content) ?? buildDefaultTableModel(1, 1);
         const columnCount = Math.max(1, tableModel.rows[0]?.cells.length ?? 1);
-        const nextRowIndex = tableModel.rows.length + 1;
+        const safeRowIndex = clamp(rowIndex, 0, tableModel.rows.length - 1);
+        const insertIndex = position === "before" ? safeRowIndex : safeRowIndex + 1;
+        const nextRowIndex = insertIndex + 1;
         const nextRow = {
           id: createId(`row-${nextRowIndex}`),
           cells: Array.from({ length: columnCount }, (_, colIndex) => ({
@@ -629,7 +641,11 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
             text: "",
           })),
         };
-        const rows = [...tableModel.rows, nextRow];
+        const rows = [
+          ...tableModel.rows.slice(0, insertIndex),
+          nextRow,
+          ...tableModel.rows.slice(insertIndex),
+        ];
 
         return {
           ...shape,
@@ -646,7 +662,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
       }),
     }));
   },
-  removeTableRow: (shapeId) => {
+  removeTableRowAt: (shapeId, rowIndex) => {
     set((state) => ({
       shapes: updateShape(state.shapes, shapeId, (shape) => {
         if (shape.attributes.type !== "table") {
@@ -658,7 +674,8 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
           return shape;
         }
 
-        const rows = tableModel.rows.slice(0, -1);
+        const safeRowIndex = clamp(rowIndex, 0, tableModel.rows.length - 1);
+        const rows = tableModel.rows.filter((_, currentIndex) => currentIndex !== safeRowIndex);
         return {
           ...shape,
           contentHtml: "",
@@ -670,7 +687,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
       }),
     }));
   },
-  addTableColumn: (shapeId) => {
+  insertTableColumnAt: (shapeId, colIndex, position) => {
     set((state) => ({
       shapes: updateShape(state.shapes, shapeId, (shape) => {
         if (shape.attributes.type !== "table") {
@@ -678,14 +695,18 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
         }
 
         const tableModel = parseTableModel(shape.rawNode.content) ?? buildDefaultTableModel(1, 1);
+        const columnCount = Math.max(1, tableModel.rows[0]?.cells.length ?? 1);
+        const safeColIndex = clamp(colIndex, 0, columnCount - 1);
+        const insertIndex = position === "before" ? safeColIndex : safeColIndex + 1;
         const rows = tableModel.rows.map((row, rowIndex) => ({
           ...row,
           cells: [
-            ...row.cells,
+            ...row.cells.slice(0, insertIndex),
             {
-              id: createId(`cell-${rowIndex + 1}-${row.cells.length + 1}`),
+              id: createId(`cell-${rowIndex + 1}-${insertIndex + 1}`),
               text: "",
             },
+            ...row.cells.slice(insertIndex),
           ],
         }));
 
@@ -706,7 +727,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
       }),
     }));
   },
-  removeTableColumn: (shapeId) => {
+  removeTableColumnAt: (shapeId, colIndex) => {
     set((state) => ({
       shapes: updateShape(state.shapes, shapeId, (shape) => {
         if (shape.attributes.type !== "table") {
@@ -719,9 +740,10 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
           return shape;
         }
 
+        const safeColIndex = clamp(colIndex, 0, columnCount - 1);
         const rows = tableModel.rows.map((row) => ({
           ...row,
-          cells: row.cells.slice(0, -1),
+          cells: row.cells.filter((_, currentIndex) => currentIndex !== safeColIndex),
         }));
 
         return {
@@ -845,9 +867,11 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
   insertTable: (rows = DEFAULT_TABLE_ROWS, columns = DEFAULT_TABLE_COLUMNS) => {
     set((state) => {
       const shapeId = createId("shape-table");
-      const tableModel = buildDefaultTableModel(rows, columns);
-      const width = 420;
-      const height = Math.max(140, tableModel.rows.length * 44);
+      const safeRows = Math.min(MAX_TABLE_GRID_SIZE, Math.max(1, rows));
+      const safeColumns = Math.min(MAX_TABLE_GRID_SIZE, Math.max(1, columns));
+      const tableModel = buildDefaultTableModel(safeRows, safeColumns);
+      const width = round2(clamp(Math.max(260, safeColumns * 96), MIN_SHAPE_SIZE, SLIDE_WIDTH));
+      const height = round2(clamp(Math.max(120, safeRows * 42), MIN_SHAPE_SIZE, SLIDE_HEIGHT));
       const nextShape = createEditableShape({
         id: shapeId,
         type: "table",
@@ -869,6 +893,12 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
         editingShapeId: nextShape.id,
       };
     });
+  },
+  setSnapGuides: (guides) => {
+    set(() => ({ snapGuides: guides }));
+  },
+  clearSnapGuides: () => {
+    set(() => ({ snapGuides: { vertical: null, horizontal: null } }));
   },
   bringToFront: () => {
     set((state) => {
