@@ -59,6 +59,15 @@ function toSlideUnit(value: unknown): string | null {
   return `calc(var(--slide-unit) * ${numeric})`;
 }
 
+function toSlideFontUnit(value: unknown): string | null {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+
+  return `calc(var(--slide-unit) * var(--slide-font-scale, 1) * ${numeric})`;
+}
+
 function styleFromAttributes(attributes: Record<string, unknown>, tagName: string): string {
   const styleEntries: string[] = [];
 
@@ -67,7 +76,7 @@ function styleFromAttributes(attributes: Record<string, unknown>, tagName: strin
     styleEntries.push(`color:${color}`);
   }
 
-  const fontSize = toSlideUnit(attributes.fontSize);
+  const fontSize = toSlideFontUnit(attributes.fontSize);
   if (fontSize) {
     styleEntries.push(`font-size:${fontSize}`);
   }

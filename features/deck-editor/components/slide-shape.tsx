@@ -1,12 +1,17 @@
 "use client";
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  AlignCenter,
   AlignJustify,
+  AlignLeft,
+  AlignRight,
   BrushCleaning,
   ChevronDown,
+  List,
+  ListOrdered,
   Minus,
   Palette,
   Plus,
@@ -21,13 +26,13 @@ import type { SlideShapeModel, TableModel, XmlNode, XmlValue } from "@/lib/slide
 
 const RESIZE_HANDLE_SIZE = 12;
 const HANDLE_HIT_SIZE = 36;
-const TEXT_DRAG_EDGE_SIZE = 14;
 const ROTATION_SNAP_DEGREES = 15;
 const ROTATE_HANDLE_OFFSET = 32;
 const TOOLBAR_GAP = 12;
 const HANDLE_EDGE_THRESHOLD = 40;
 const SLIDE_BASE_WIDTH = 960;
 const SLIDE_BASE_HEIGHT = 540;
+const MIN_SHAPE_SIZE = 12;
 const SNAP_THRESHOLD = 6;
 const CONTROL_OVERLAY_Z_INDEX = 10_000;
 const TOOLBAR_PORTAL_Z_INDEX = 10_100;
@@ -39,6 +44,24 @@ const COLOR_OPTIONS = [
   "rgba(239, 95, 0, 1)",
   "rgba(31, 35, 41, 1)",
   "rgba(100, 100, 100, 1)",
+] as const;
+const THEME_COLOR_OPTIONS = [
+  "rgba(13, 116, 206, 1)",
+  "rgba(16, 185, 129, 1)",
+  "rgba(245, 158, 11, 1)",
+  "rgba(239, 68, 68, 1)",
+  "rgba(99, 102, 241, 1)",
+  "rgba(31, 35, 41, 1)",
+] as const;
+const ALIGN_OPTIONS = [
+  { label: "左对齐", value: "left", icon: AlignLeft },
+  { label: "居中对齐", value: "center", icon: AlignCenter },
+  { label: "右对齐", value: "right", icon: AlignRight },
+] as const;
+const LIST_OPTIONS = [
+  { label: "无列表", value: "none", icon: List },
+  { label: "有序列表", value: "ordered", icon: ListOrdered },
+  { label: "无序列表", value: "unordered", icon: List },
 ] as const;
 const SHAPE_FILL_OPTIONS = [
   "rgba(255, 255, 255, 1)",
@@ -66,6 +89,8 @@ type TextStyleState = {
   fontFamily: string;
   fontSize: number;
   color: string;
+  textAlign: "left" | "center" | "right";
+  listType: "none" | "ordered" | "unordered";
 };
 
 type RotationIndicator = {
@@ -92,6 +117,22 @@ function toDegrees(radian: number): number {
   return (radian * 180) / Math.PI;
 }
 
+function isSameRect(a: DOMRect | null, b: DOMRect | null): boolean {
+  if (!a && !b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+
+  return (
+    Math.abs(a.left - b.left) < 0.5 &&
+    Math.abs(a.top - b.top) < 0.5 &&
+    Math.abs(a.width - b.width) < 0.5 &&
+    Math.abs(a.height - b.height) < 0.5
+  );
+}
+
 function getTopToolbarPortalStyle(params: {
   viewportRect: DOMRect | null;
   shape: { x: number; y: number; width: number };
@@ -108,6 +149,25 @@ function getTopToolbarPortalStyle(params: {
     position: "fixed",
     left: viewportRect.left + (shape.x + shape.width / 2) * scaleX,
     top: viewportRect.top + shape.y * scaleY - TOOLBAR_GAP,
+    transform: "translate(-50%, -100%)",
+    zIndex: TOOLBAR_PORTAL_Z_INDEX,
+  };
+}
+
+function getSelectionToolbarPortalStyle(selectionRect: DOMRect | null): CSSProperties | null {
+  if (!selectionRect) {
+    return null;
+  }
+
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+  const targetLeft = selectionRect.left + selectionRect.width / 2;
+  const clampedLeft = viewportWidth > 0 ? Math.min(Math.max(targetLeft, 24), viewportWidth - 24) : targetLeft;
+  const targetTop = Math.max(12, selectionRect.top - TOOLBAR_GAP);
+
+  return {
+    position: "fixed",
+    left: clampedLeft,
+    top: targetTop,
     transform: "translate(-50%, -100%)",
     zIndex: TOOLBAR_PORTAL_Z_INDEX,
   };
@@ -318,6 +378,13 @@ function normalizeColor(value: string): string {
 }
 
 function parseFontSize(styleValue: string): number | null {
+  const scaledCalcMatch = styleValue.match(
+    /calc\(var\(--slide-unit\)\s*\*\s*var\(--slide-font-scale,\s*[\d.]+\)\s*\*\s*([\d.]+)\)/,
+  );
+  if (scaledCalcMatch) {
+    return Number(scaledCalcMatch[1]);
+  }
+
   const calcMatch = styleValue.match(/calc\(var\(--slide-unit\)\s*\*\s*([\d.]+)\)/);
   if (calcMatch) {
     return Number(calcMatch[1]);
@@ -330,6 +397,25 @@ function parseFontSize(styleValue: string): number | null {
 
   const numeric = Number(styleValue);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function parsePixelValue(value: string): number | null {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getLineHeightPx(computed: CSSStyleDeclaration): number {
+  const parsedLineHeight = parsePixelValue(computed.lineHeight);
+  if (parsedLineHeight && parsedLineHeight > 0) {
+    return parsedLineHeight;
+  }
+
+  const parsedFontSize = parsePixelValue(computed.fontSize);
+  if (parsedFontSize && parsedFontSize > 0) {
+    return parsedFontSize * 1.25;
+  }
+
+  return 20;
 }
 
 function extractFontFamily(value: string): string {
@@ -345,22 +431,96 @@ function extractFontFamily(value: string): string {
   return primary;
 }
 
-function readSelectionTextStyle(editableElement: HTMLDivElement): TextStyleState {
+function toTextStyleFromComputedStyle(computed: CSSStyleDeclaration, slideUnitPx: number): TextStyleState {
+  const parsedFontSize = Number.isFinite(Number(computed.fontSize.replace("px", "")))
+    ? Number(computed.fontSize.replace("px", ""))
+    : 16;
+  const safeSlideUnit = Number.isFinite(slideUnitPx) && slideUnitPx > 0 ? slideUnitPx : 1;
+  const computedAlign = computed.textAlign.toLowerCase();
+  const textAlign: TextStyleState["textAlign"] =
+    computedAlign === "center" ? "center" : computedAlign === "right" || computedAlign === "end" ? "right" : "left";
+
+  return {
+    fontFamily: extractFontFamily(computed.fontFamily),
+    fontSize: Math.max(8, Math.round(parsedFontSize / safeSlideUnit)),
+    color: normalizeColor(computed.color),
+    textAlign,
+    listType: "none",
+  };
+}
+
+function resolveSelectionAnchor(editableElement: HTMLDivElement): Element {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0) {
+    return editableElement;
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!editableElement.contains(range.commonAncestorContainer)) {
+    return editableElement;
+  }
+
+  if (range.startContainer instanceof Element) {
+    return range.startContainer;
+  }
+
+  return range.startContainer.parentElement ?? editableElement;
+}
+
+function readListType(editableElement: HTMLDivElement): TextStyleState["listType"] {
+  const anchor = resolveSelectionAnchor(editableElement);
+  const listParent = anchor.closest("ol, ul");
+  if (!listParent || !editableElement.contains(listParent)) {
+    return "none";
+  }
+
+  return listParent.tagName.toLowerCase() === "ol" ? "ordered" : "unordered";
+}
+
+function resolveTextStyleTarget(editableElement: HTMLDivElement): Element {
+  const styledTarget = editableElement.querySelector<HTMLElement>("[style*='font-size']");
+  if (styledTarget) {
+    return styledTarget;
+  }
+
+  return editableElement.querySelector("span, strong, em, p, li, div") ?? editableElement.firstElementChild ?? editableElement;
+}
+
+function resolveTextStyleTargetFromAnchor(anchor: Element, editableElement: HTMLDivElement): Element {
+  const anchorElement = anchor as HTMLElement;
+  if (anchorElement.style?.fontSize) {
+    return anchorElement;
+  }
+
+  const descendantWithFontSize = anchorElement.querySelector<HTMLElement>("[style*='font-size']");
+  if (descendantWithFontSize) {
+    return descendantWithFontSize;
+  }
+
+  const ancestorWithFontSize = anchorElement.closest("[style*='font-size']");
+  if (ancestorWithFontSize && editableElement.contains(ancestorWithFontSize)) {
+    return ancestorWithFontSize;
+  }
+
+  return resolveTextStyleTarget(editableElement);
+}
+
+function readSelectionTextStyle(editableElement: HTMLDivElement, slideUnitPx = 1): TextStyleState {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    const computed = window.getComputedStyle(resolveTextStyleTarget(editableElement));
     return {
-      fontFamily: FONT_OPTIONS[0],
-      fontSize: 16,
-      color: "rgba(31, 35, 41, 1)",
+      ...toTextStyleFromComputedStyle(computed, slideUnitPx),
+      listType: readListType(editableElement),
     };
   }
 
   const range = selection.getRangeAt(0);
   if (!editableElement.contains(range.commonAncestorContainer)) {
+    const computed = window.getComputedStyle(resolveTextStyleTarget(editableElement));
     return {
-      fontFamily: FONT_OPTIONS[0],
-      fontSize: 16,
-      color: "rgba(31, 35, 41, 1)",
+      ...toTextStyleFromComputedStyle(computed, slideUnitPx),
+      listType: readListType(editableElement),
     };
   }
 
@@ -369,15 +529,11 @@ function readSelectionTextStyle(editableElement: HTMLDivElement): TextStyleState
       ? range.startContainer
       : range.startContainer.parentElement ?? editableElement;
 
-  const computed = window.getComputedStyle(element as Element);
-  const parsedFontSize = Number.isFinite(Number(computed.fontSize.replace("px", "")))
-    ? Number(computed.fontSize.replace("px", ""))
-    : 16;
-
+  const targetElement = resolveTextStyleTargetFromAnchor(element as Element, editableElement);
+  const computed = window.getComputedStyle(targetElement);
   return {
-    fontFamily: extractFontFamily(computed.fontFamily),
-    fontSize: Math.max(8, Math.round(parsedFontSize)),
-    color: normalizeColor(computed.color),
+    ...toTextStyleFromComputedStyle(computed, slideUnitPx),
+    listType: readListType(editableElement),
   };
 }
 
@@ -460,6 +616,32 @@ function restoreCollapsedSelection(
   return true;
 }
 
+function executeTextCommand(editableElement: HTMLDivElement, command: string): boolean {
+  const selection = window.getSelection();
+  if (!selection) {
+    return false;
+  }
+
+  if (!selection.rangeCount || !editableElement.contains(selection.getRangeAt(0).commonAncestorContainer)) {
+    editableElement.focus();
+  }
+
+  return document.execCommand(command);
+}
+
+function placeCaretAtEnd(editableElement: HTMLDivElement): void {
+  const selection = window.getSelection();
+  if (!selection) {
+    return;
+  }
+
+  const range = document.createRange();
+  range.selectNodeContents(editableElement);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 function applyStyleToEntireContent(
   editableElement: HTMLDivElement,
   apply: (style: CSSStyleDeclaration) => void,
@@ -488,7 +670,7 @@ function insertStyledTextAtCaret(
 
   const span = document.createElement("span");
   span.style.fontFamily = styleState.fontFamily;
-  span.style.fontSize = `calc(var(--slide-unit) * ${styleState.fontSize})`;
+  span.style.fontSize = `calc(var(--slide-unit) * var(--slide-font-scale, 1) * ${styleState.fontSize})`;
   span.style.color = styleState.color;
   span.textContent = text;
 
@@ -710,9 +892,12 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     fontFamily: FONT_OPTIONS[0],
     fontSize: 16,
     color: "rgba(31, 35, 41, 1)",
+    textAlign: "left",
+    listType: "none",
   });
   const [rotationIndicator, setRotationIndicator] = useState<RotationIndicator | null>(null);
   const [viewportRect, setViewportRect] = useState<DOMRect | null>(null);
+  const [selectionToolbarRect, setSelectionToolbarRect] = useState<DOMRect | null>(null);
   const draftTextStyleRef = useRef<TextStyleState | null>(null);
   const savedCollapsedRangeRef = useRef<Range | null>(null);
   const tableCellRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -776,6 +961,12 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       }),
     [shape.attributes.topLeftX, shape.attributes.topLeftY, shape.attributes.width, viewportRect],
   );
+  const textToolbarPortalStyle = useMemo(() => {
+    if (isEditing) {
+      return getSelectionToolbarPortalStyle(selectionToolbarRect);
+    }
+    return toolbarPortalStyle;
+  }, [isEditing, selectionToolbarRect, toolbarPortalStyle]);
   const controlOverlayStyle = useMemo<CSSProperties | null>(() => {
     if (!viewportRect) {
       return null;
@@ -801,6 +992,60 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   ]);
   const shapeZIndex =
     "zIndex" in shape ? Math.max(0, Number.isFinite(shape.zIndex) ? shape.zIndex : 0) : undefined;
+  const slideUnitPx = useMemo(() => {
+    if (viewportRect && viewportRect.width > 0) {
+      return viewportRect.width / SLIDE_BASE_WIDTH;
+    }
+    return 1;
+  }, [viewportRect]);
+  const syncViewportRect = useCallback(() => {
+    const element = viewportRef?.current;
+    const nextRect = element ? element.getBoundingClientRect() : null;
+    setViewportRect((prevRect) => (isSameRect(prevRect, nextRect) ? prevRect : nextRect));
+  }, [viewportRef]);
+
+  const resizeTextShapeToContent = useCallback(
+    (mode: "single-line" | "content") => {
+      if (!hasRichTextContent) {
+        return;
+      }
+
+      const element = editableRef.current;
+      if (!element) {
+        return;
+      }
+
+      const computed = window.getComputedStyle(element);
+      const lineHeightPx = getLineHeightPx(computed);
+
+      const clone = element.cloneNode(true) as HTMLDivElement;
+      clone.contentEditable = "false";
+      clone.style.position = "fixed";
+      clone.style.left = "-9999px";
+      clone.style.top = "-9999px";
+      clone.style.visibility = "hidden";
+      clone.style.pointerEvents = "none";
+      clone.style.width = "max-content";
+      clone.style.height = "auto";
+      clone.style.minWidth = "0";
+      clone.style.maxWidth = "none";
+      clone.style.whiteSpace = "pre";
+      clone.style.overflow = "visible";
+
+      document.body.appendChild(clone);
+      const measuredWidthPx = clone.scrollWidth;
+      const measuredHeightPx = clone.scrollHeight;
+      clone.remove();
+
+      const safeUnit = Number.isFinite(slideUnitPx) && slideUnitPx > 0 ? slideUnitPx : 1;
+      const widthInSlide = Math.max(MIN_SHAPE_SIZE, measuredWidthPx / safeUnit);
+      const contentHeightPx = mode === "single-line" ? lineHeightPx : measuredHeightPx;
+      const heightInSlide = Math.max(MIN_SHAPE_SIZE, contentHeightPx / safeUnit);
+
+      updateShapeSize(shapeId, widthInSlide, heightInSlide);
+    },
+    [hasRichTextContent, shapeId, slideUnitPx, updateShapeSize],
+  );
 
   useEffect(() => {
     if (!viewportRef) {
@@ -811,8 +1056,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     const resizeObserver =
       viewportElement && typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(() => {
-            const element = viewportRef.current;
-            setViewportRect(element ? element.getBoundingClientRect() : null);
+            syncViewportRect();
           })
         : null;
 
@@ -820,20 +1064,43 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       resizeObserver.observe(viewportElement);
     }
 
-    const syncViewportRect = () => {
-      const element = viewportRef.current;
-      setViewportRect(element ? element.getBoundingClientRect() : null);
-    };
-
-    syncViewportRect();
+    const initialFrameId = window.requestAnimationFrame(syncViewportRect);
     window.addEventListener("resize", syncViewportRect);
     window.addEventListener("scroll", syncViewportRect, true);
     return () => {
+      window.cancelAnimationFrame(initialFrameId);
       resizeObserver?.disconnect();
       window.removeEventListener("resize", syncViewportRect);
       window.removeEventListener("scroll", syncViewportRect, true);
     };
-  }, [viewportRef]);
+  }, [syncViewportRect, viewportRef]);
+
+  useLayoutEffect(() => {
+    if (!viewportRef || !isSelected) {
+      return;
+    }
+
+    let frameId2 = 0;
+    const frameId1 = window.requestAnimationFrame(() => {
+      syncViewportRect();
+      frameId2 = window.requestAnimationFrame(syncViewportRect);
+    });
+    return () => {
+      window.cancelAnimationFrame(frameId1);
+      if (frameId2) {
+        window.cancelAnimationFrame(frameId2);
+      }
+    };
+  }, [
+    currentRotation,
+    isSelected,
+    shape.attributes.height,
+    shape.attributes.topLeftX,
+    shape.attributes.topLeftY,
+    shape.attributes.width,
+    syncViewportRect,
+    viewportRef,
+  ]);
 
   const syncShapeContentFromDom = useCallback(() => {
     if (!isInteractive) {
@@ -864,6 +1131,28 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   }, [contentHtml, isEditing]);
 
   useEffect(() => {
+    if (!isInteractive || !isEditing || !hasRichTextContent) {
+      return;
+    }
+
+    const element = editableRef.current;
+    if (!element) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      element.focus();
+      placeCaretAtEnd(element);
+      resizeTextShapeToContent("content");
+      setTextStyle(readSelectionTextStyle(element, slideUnitPx));
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [hasRichTextContent, isEditing, isInteractive, resizeTextShapeToContent, slideUnitPx]);
+
+  useEffect(() => {
     if (!isInteractive || !isEditing) {
       return;
     }
@@ -881,16 +1170,51 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         if (isInside && range.collapsed) {
           savedCollapsedRangeRef.current = range.cloneRange();
         }
+
+        if (isInside && !range.collapsed) {
+          const measuredRect = range.getBoundingClientRect();
+          const fallbackRect = range.getClientRects().item(0);
+          const nextRect =
+            measuredRect.width > 0 || measuredRect.height > 0
+              ? measuredRect
+              : fallbackRect && (fallbackRect.width > 0 || fallbackRect.height > 0)
+                ? fallbackRect
+                : null;
+          setSelectionToolbarRect((prevRect) => (isSameRect(prevRect, nextRect) ? prevRect : nextRect));
+        } else {
+          setSelectionToolbarRect((prevRect) => (prevRect ? null : prevRect));
+        }
+      } else {
+        setSelectionToolbarRect((prevRect) => (prevRect ? null : prevRect));
       }
 
-      setTextStyle(readSelectionTextStyle(element));
+      setTextStyle(readSelectionTextStyle(element, slideUnitPx));
     };
 
     document.addEventListener("selectionchange", onSelectionChange);
     return () => {
       document.removeEventListener("selectionchange", onSelectionChange);
     };
-  }, [isEditing, isInteractive]);
+  }, [isEditing, isInteractive, slideUnitPx]);
+
+  useEffect(() => {
+    if (!isInteractive || !isSelected || !hasRichTextContent) {
+      return;
+    }
+
+    const element = editableRef.current;
+    if (!element) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      setTextStyle(readSelectionTextStyle(element, slideUnitPx));
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [contentHtml, hasRichTextContent, isInteractive, isSelected, slideUnitPx]);
 
   const applyTextStyle = useCallback(
     (apply: (style: CSSStyleDeclaration) => void) => {
@@ -900,7 +1224,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       }
 
       if (hasExpandedSelectionInside(element) && applyStyleToSelection(element, apply)) {
-        setTextStyle(readSelectionTextStyle(element));
+        setTextStyle(readSelectionTextStyle(element, slideUnitPx));
         draftTextStyleRef.current = null;
         syncShapeContentFromDom();
         return;
@@ -910,11 +1234,13 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         fontFamily: textStyle.fontFamily,
         fontSize: textStyle.fontSize,
         color: textStyle.color,
+        textAlign: textStyle.textAlign,
+        listType: textStyle.listType,
       };
 
       const styleTarget = document.createElement("span").style;
       styleTarget.fontFamily = draft.fontFamily;
-      styleTarget.fontSize = `calc(var(--slide-unit) * ${draft.fontSize})`;
+      styleTarget.fontSize = `calc(var(--slide-unit) * var(--slide-font-scale, 1) * ${draft.fontSize})`;
       styleTarget.color = draft.color;
       apply(styleTarget);
 
@@ -922,6 +1248,13 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         fontFamily: styleTarget.fontFamily ? extractFontFamily(styleTarget.fontFamily) : draft.fontFamily,
         fontSize: styleTarget.fontSize ? parseFontSize(styleTarget.fontSize) ?? draft.fontSize : draft.fontSize,
         color: styleTarget.color ? normalizeColor(styleTarget.color) : draft.color,
+        textAlign:
+          styleTarget.textAlign === "center"
+            ? "center"
+            : styleTarget.textAlign === "right" || styleTarget.textAlign === "end"
+              ? "right"
+              : draft.textAlign,
+        listType: draft.listType,
       };
 
       if (!isCollapsedSelectionInside(element)) {
@@ -930,10 +1263,81 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 
       applyStyleToEntireContent(element, apply);
       syncShapeContentFromDom();
+      resizeTextShapeToContent("content");
       draftTextStyleRef.current = nextDraft;
       setTextStyle(nextDraft);
     },
-    [syncShapeContentFromDom, textStyle.color, textStyle.fontFamily, textStyle.fontSize],
+    [
+      syncShapeContentFromDom,
+      textStyle.color,
+      textStyle.fontFamily,
+      textStyle.fontSize,
+      textStyle.listType,
+      textStyle.textAlign,
+      resizeTextShapeToContent,
+      slideUnitPx,
+    ],
+  );
+
+  const applyTextAlignment = useCallback(
+    (align: TextStyleState["textAlign"]) => {
+      const element = editableRef.current;
+      if (!element) {
+        return;
+      }
+
+      if (!hasExpandedSelectionInside(element) && !isCollapsedSelectionInside(element)) {
+        restoreCollapsedSelection(element, savedCollapsedRangeRef.current);
+      }
+
+      const command = align === "left" ? "justifyLeft" : align === "center" ? "justifyCenter" : "justifyRight";
+      const didApply = executeTextCommand(element, command);
+      if (!didApply) {
+        applyStyleToEntireContent(element, (style) => {
+          style.textAlign = align;
+        });
+      }
+
+      syncShapeContentFromDom();
+      setTextStyle(readSelectionTextStyle(element, slideUnitPx));
+    },
+    [slideUnitPx, syncShapeContentFromDom],
+  );
+
+  const applyListType = useCallback(
+    (listType: TextStyleState["listType"]) => {
+      const element = editableRef.current;
+      if (!element) {
+        return;
+      }
+
+      if (!hasExpandedSelectionInside(element) && !isCollapsedSelectionInside(element)) {
+        restoreCollapsedSelection(element, savedCollapsedRangeRef.current);
+      }
+
+      const current = readListType(element);
+      if (listType === "none") {
+        if (current === "ordered") {
+          executeTextCommand(element, "insertOrderedList");
+        } else if (current === "unordered") {
+          executeTextCommand(element, "insertUnorderedList");
+        }
+      } else if (listType === "ordered") {
+        if (current === "unordered") {
+          executeTextCommand(element, "insertUnorderedList");
+        }
+        executeTextCommand(element, "insertOrderedList");
+      } else {
+        if (current === "ordered") {
+          executeTextCommand(element, "insertOrderedList");
+        }
+        executeTextCommand(element, "insertUnorderedList");
+      }
+
+      syncShapeContentFromDom();
+      setTextStyle(readSelectionTextStyle(element, slideUnitPx));
+    },
+    [slideUnitPx, syncShapeContentFromDom],
   );
 
   const beginDrag = (event: ReactPointerEvent<HTMLElement>) => {
@@ -1117,7 +1521,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
           zIndex: shapeZIndex,
           cursor: isDraggableTextShape ? "move" : undefined,
         }}
-        onPointerDown={isInteractive ? beginDrag : undefined}
+        onPointerDown={isInteractive && !isEditing ? beginDrag : undefined}
       >
       <div
         className="h-full w-full overflow-hidden"
@@ -1326,7 +1730,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         ) : hasRichTextContent ? (
           <div
             ref={editableRef}
-            className="h-full w-full"
+            className="h-full w-full [&_ol]:ml-6 [&_ol]:list-decimal [&_ol]:pl-2 [&_ul]:ml-6 [&_ul]:list-disc [&_ul]:pl-2 [&_li]:leading-[1.5]"
             contentEditable={isInteractive && isEditing}
             style={{ cursor: isDraggableTextShape ? "move" : undefined }}
             suppressContentEditableWarning
@@ -1360,6 +1764,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
                 return;
               }
               syncShapeContentFromDom();
+              resizeTextShapeToContent("content");
             }}
             onBeforeInput={(event) => {
               if (!isInteractive || !isEditing) {
@@ -1391,6 +1796,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 
               event.preventDefault();
               syncShapeContentFromDom();
+              resizeTextShapeToContent("content");
             }}
             onBlur={() => {
               if (!isInteractive) {
@@ -1399,17 +1805,20 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
               syncShapeContentFromDom();
               draftTextStyleRef.current = null;
               savedCollapsedRangeRef.current = null;
+              setSelectionToolbarRect(null);
               setEditingShape(null);
             }}
           />
         ) : null}
       </div>
 
-      {isSelected && hasRichTextContent ? (
+      {isSelected && hasRichTextContent && (!isEditing || selectionToolbarRect) ? (
         <TextFormatToolbar
           isMobile={isMobile}
-          portalStyle={toolbarPortalStyle}
+          portalStyle={textToolbarPortalStyle}
           textStyle={textStyle}
+          onApplyAlign={applyTextAlignment}
+          onApplyListType={applyListType}
           onApplyFont={(fontFamily) => {
             applyTextStyle((style) => {
               style.fontFamily = fontFamily;
@@ -1417,7 +1826,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
           }}
           onApplyFontSize={(fontSize) => {
             applyTextStyle((style) => {
-              style.fontSize = `calc(var(--slide-unit) * ${fontSize})`;
+              style.fontSize = `calc(var(--slide-unit) * var(--slide-font-scale, 1) * ${fontSize})`;
             });
           }}
           onApplyColor={(color) => {
@@ -1473,32 +1882,8 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         />
       ) : null}
 
-        {isSelected && isEditing && hasRichTextContent ? (
-          <>
-            <div
-              className="absolute z-20"
-              style={{ left: 0, top: -TEXT_DRAG_EDGE_SIZE / 2, width: "100%", height: TEXT_DRAG_EDGE_SIZE, cursor: "move" }}
-              onPointerDown={beginDrag}
-            />
-            <div
-              className="absolute z-20"
-              style={{ right: -TEXT_DRAG_EDGE_SIZE / 2, top: 0, width: TEXT_DRAG_EDGE_SIZE, height: "100%", cursor: "move" }}
-              onPointerDown={beginDrag}
-            />
-            <div
-              className="absolute z-20"
-              style={{ left: 0, bottom: -TEXT_DRAG_EDGE_SIZE / 2, width: "100%", height: TEXT_DRAG_EDGE_SIZE, cursor: "move" }}
-              onPointerDown={beginDrag}
-            />
-            <div
-              className="absolute z-20"
-              style={{ left: -TEXT_DRAG_EDGE_SIZE / 2, top: 0, width: TEXT_DRAG_EDGE_SIZE, height: "100%", cursor: "move" }}
-              onPointerDown={beginDrag}
-            />
-          </>
-        ) : null}
       </div>
-      {isSelected && controlOverlayStyle && typeof document !== "undefined"
+      {isSelected && !isEditing && controlOverlayStyle && typeof document !== "undefined"
         ? createPortal(
             <div data-shape-controls="true" className="pointer-events-none absolute overflow-visible" style={controlOverlayStyle}>
               <div
@@ -1582,6 +1967,8 @@ type TextFormatToolbarProps = {
   isMobile: boolean;
   portalStyle: CSSProperties | null;
   textStyle: TextStyleState;
+  onApplyAlign: (align: TextStyleState["textAlign"]) => void;
+  onApplyListType: (listType: TextStyleState["listType"]) => void;
   onApplyFont: (fontFamily: string) => void;
   onApplyFontSize: (fontSize: number) => void;
   onApplyColor: (color: string) => void;
@@ -1591,128 +1978,260 @@ function TextFormatToolbar({
   isMobile,
   portalStyle,
   textStyle,
+  onApplyAlign,
+  onApplyListType,
   onApplyFont,
   onApplyFontSize,
   onApplyColor,
 }: TextFormatToolbarProps) {
+  const [activePanel, setActivePanel] = useState<"align" | "list" | "font" | "color" | null>(null);
+  const [recentColors, setRecentColors] = useState<string[]>([]);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onPointerDownOutside = (event: PointerEvent) => {
+      if (!toolbarRef.current) {
+        return;
+      }
+      if (!toolbarRef.current.contains(event.target as Node)) {
+        setActivePanel(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", onPointerDownOutside);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDownOutside);
+    };
+  }, []);
+
+  const alignLabel = useMemo(() => {
+    const option = ALIGN_OPTIONS.find((item) => item.value === textStyle.textAlign);
+    return option?.label ?? "左对齐";
+  }, [textStyle.textAlign]);
+
+  const listLabel = useMemo(() => {
+    const option = LIST_OPTIONS.find((item) => item.value === textStyle.listType);
+    return option?.label ?? "无列表";
+  }, [textStyle.listType]);
+
+  const handleColorApply = useCallback(
+    (color: string) => {
+      onApplyColor(color);
+      setRecentColors((current) => [color, ...current.filter((item) => item !== color)].slice(0, 8));
+      setActivePanel(null);
+    },
+    [onApplyColor],
+  );
+
   if (!portalStyle || typeof document === "undefined") {
     return null;
   }
 
   return createPortal(
-    <div data-shape-toolbar="true" style={portalStyle} onPointerDown={(event) => event.stopPropagation()}>
-      <div
-        className={`flex items-center rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "gap-1 px-1.5 py-1" : "min-w-max gap-2 px-2 py-1.5"}`}
-      >
-        {isMobile ? (
-          <>
-            <label className="sr-only" htmlFor="font-family-mobile">
-              字体
-            </label>
-            <select
-              id="font-family-mobile"
-              value={textStyle.fontFamily}
-              onChange={(event) => onApplyFont(event.currentTarget.value)}
-              className="h-8 max-w-[96px] rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 outline-none"
+    <div
+      data-shape-toolbar="true"
+      style={portalStyle}
+      onPointerDown={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      <div ref={toolbarRef} className="relative">
+        <div
+          className={`flex items-center rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "gap-1 px-1.5 py-1" : "min-w-max gap-2 px-2 py-1.5"}`}
+        >
+          <div className="relative">
+            <button
+              type="button"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-100"
+              onClick={() => setActivePanel((current) => (current === "align" ? null : "align"))}
             >
-              {FONT_OPTIONS.map((font) => (
-                <option key={font} value={font}>
-                  {font}
-                </option>
-              ))}
-            </select>
-            <div className="flex h-8 items-center rounded-md border border-slate-300">
-              <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => onApplyFontSize(Math.max(8, textStyle.fontSize - 1))}
-                className="grid h-8 w-7 place-items-center text-xs text-slate-700 hover:bg-slate-100"
-              >
-                -
-              </button>
-              <span className="w-7 text-center text-xs font-medium text-slate-800">{textStyle.fontSize}</span>
-              <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => onApplyFontSize(Math.min(96, textStyle.fontSize + 1))}
-                className="grid h-8 w-7 place-items-center text-xs text-slate-700 hover:bg-slate-100"
-              >
-                +
-              </button>
-            </div>
-            <label className="sr-only" htmlFor="font-color-mobile">
-              颜色
-            </label>
-            <select
-              id="font-color-mobile"
-              value={textStyle.color}
-              onChange={(event) => onApplyColor(event.currentTarget.value)}
-              className="h-8 max-w-[92px] rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 outline-none"
+              {alignLabel}
+              <ChevronDown className={`h-4 w-4 transition-transform ${activePanel === "align" ? "rotate-180" : ""}`} />
+            </button>
+            {activePanel === "align" ? (
+              <div className="absolute left-0 top-[calc(100%+10px)] z-30 w-44 rounded-xl border border-slate-300 bg-white p-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+                {ALIGN_OPTIONS.map((option) => {
+                  const Icon = option.icon;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+                        textStyle.textAlign === option.value
+                          ? "bg-sky-50 text-sky-700"
+                          : "text-slate-700 hover:bg-slate-100"
+                      }`}
+                      onClick={() => {
+                        onApplyAlign(option.value);
+                        setActivePanel(null);
+                      }}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="relative">
+            <button
+              type="button"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-100"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setActivePanel((current) => (current === "list" ? null : "list"))}
             >
-              {COLOR_OPTIONS.map((color) => (
-                <option key={color} value={color}>
-                  {color}
-                </option>
-              ))}
-            </select>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-1">
-              {FONT_OPTIONS.map((font) => (
-                <button
-                  key={font}
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => onApplyFont(font)}
-                  className={`rounded-md px-2 py-1 text-xs transition-colors ${
-                    textStyle.fontFamily === font
-                      ? "bg-sky-50 text-sky-700"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  {font}
-                </button>
-              ))}
-            </div>
+              {listLabel}
+              <ChevronDown className={`h-4 w-4 transition-transform ${activePanel === "list" ? "rotate-180" : ""}`} />
+            </button>
+            {activePanel === "list" ? (
+              <div className="absolute left-0 top-[calc(100%+10px)] z-30 w-44 rounded-xl border border-slate-300 bg-white p-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+                {LIST_OPTIONS.map((option) => {
+                  const Icon = option.icon;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+                        textStyle.listType === option.value
+                          ? "bg-sky-50 text-sky-700"
+                          : "text-slate-700 hover:bg-slate-100"
+                      }`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        onApplyListType(option.value);
+                        setActivePanel(null);
+                      }}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
 
-            <div className="flex h-8 items-center rounded-xl border border-slate-300">
-              <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => onApplyFontSize(Math.max(8, textStyle.fontSize - 1))}
-                className="grid h-8 w-8 place-items-center rounded-l-xl text-slate-700 hover:bg-slate-100"
-              >
-                -
-              </button>
-              <span className="w-10 text-center text-sm font-medium text-slate-800">{textStyle.fontSize}</span>
-              <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => onApplyFontSize(Math.min(96, textStyle.fontSize + 1))}
-                className="grid h-8 w-8 place-items-center rounded-r-xl text-slate-700 hover:bg-slate-100"
-              >
-                +
-              </button>
-            </div>
+          <div className="relative">
+            <button
+              type="button"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-100"
+              onClick={() => setActivePanel((current) => (current === "font" ? null : "font"))}
+            >
+              <span className="max-w-[120px] truncate">{textStyle.fontFamily}</span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${activePanel === "font" ? "rotate-180" : ""}`} />
+            </button>
+            {activePanel === "font" ? (
+              <div className="absolute left-0 top-[calc(100%+10px)] z-30 w-48 rounded-xl border border-slate-300 bg-white p-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+                {FONT_OPTIONS.map((font) => (
+                  <button
+                    key={font}
+                    type="button"
+                    className={`flex w-full items-center rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+                      textStyle.fontFamily === font
+                        ? "bg-sky-50 text-sky-700"
+                        : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                    style={{ fontFamily: font }}
+                    onClick={() => {
+                      onApplyFont(font);
+                      setActivePanel(null);
+                    }}
+                  >
+                    {font}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
 
-            <div className="flex items-center gap-1 rounded-lg border border-slate-200 p-1">
-              {COLOR_OPTIONS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => onApplyColor(color)}
-                  className="h-6 w-6 rounded-full border border-slate-200"
-                  style={{
-                    backgroundColor: color,
-                    boxShadow: textStyle.color === color ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
-                  }}
-                />
-              ))}
-            </div>
-          </>
-        )}
+          <div className="flex h-8 items-center rounded-xl border border-slate-300 bg-white p-0.5">
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onApplyFontSize(Math.max(8, textStyle.fontSize - 1))}
+              className="grid h-7 w-7 place-items-center rounded-lg text-slate-700 transition-colors hover:bg-slate-100"
+            >
+              -
+            </button>
+            <span className="w-9 text-center text-sm font-medium text-slate-800">{textStyle.fontSize}</span>
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onApplyFontSize(Math.min(96, textStyle.fontSize + 1))}
+              className="grid h-7 w-7 place-items-center rounded-lg text-slate-700 transition-colors hover:bg-slate-100"
+            >
+              +
+            </button>
+          </div>
+
+          <div className="relative">
+            <button
+              type="button"
+              className="flex h-8 items-center gap-2 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-100"
+              onClick={() => setActivePanel((current) => (current === "color" ? null : "color"))}
+            >
+              <span className="h-4 w-4 rounded-full border border-slate-200" style={{ backgroundColor: textStyle.color }} />
+              <span>颜色</span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${activePanel === "color" ? "rotate-180" : ""}`} />
+            </button>
+            {activePanel === "color" ? (
+              <div className="absolute right-0 top-[calc(100%+10px)] z-30 w-[260px] rounded-xl border border-slate-300 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+                <p className="mb-2 text-xs font-medium text-slate-500">主题色</p>
+                <div className="mb-3 grid grid-cols-6 gap-2">
+                  {THEME_COLOR_OPTIONS.map((color) => (
+                    <button
+                      key={`theme-${color}`}
+                      type="button"
+                      className="h-7 w-7 rounded-full border border-slate-200"
+                      style={{
+                        backgroundColor: color,
+                        boxShadow: textStyle.color === color ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
+                      }}
+                      onClick={() => handleColorApply(color)}
+                    />
+                  ))}
+                </div>
+
+                <p className="mb-2 text-xs font-medium text-slate-500">最近使用颜色</p>
+                <div className="mb-3 grid min-h-8 grid-cols-6 gap-2">
+                  {recentColors.length > 0 ? (
+                    recentColors.map((color) => (
+                      <button
+                        key={`recent-${color}`}
+                        type="button"
+                        className="h-7 w-7 rounded-full border border-slate-200"
+                        style={{
+                          backgroundColor: color,
+                          boxShadow: textStyle.color === color ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
+                        }}
+                        onClick={() => handleColorApply(color)}
+                      />
+                    ))
+                  ) : (
+                    <span className="col-span-6 text-[11px] text-slate-400">暂无最近使用</span>
+                  )}
+                </div>
+
+                <p className="mb-2 text-xs font-medium text-slate-500">预设色板</p>
+                <div className="grid grid-cols-6 gap-2">
+                  {COLOR_OPTIONS.map((color) => (
+                    <button
+                      key={`preset-${color}`}
+                      type="button"
+                      className="h-7 w-7 rounded-full border border-slate-200"
+                      style={{
+                        backgroundColor: color,
+                        boxShadow: textStyle.color === color ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
+                      }}
+                      onClick={() => handleColorApply(color)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
       </div>
     </div>,
     document.body,

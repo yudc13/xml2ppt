@@ -10,12 +10,13 @@ import type {
   XmlNode,
   XmlValue,
 } from "@/lib/slide-xml/types";
+import { TEXT_PRESET_MAP } from "@/features/slide-editor/text-preset-config";
 
 const SLIDE_WIDTH = 960;
 const SLIDE_HEIGHT = 540;
 const MIN_SHAPE_SIZE = 12;
-const DEFAULT_INSERT_WIDTH = 320;
-const DEFAULT_INSERT_HEIGHT = 120;
+const DEFAULT_INSERT_WIDTH = 180;
+const DEFAULT_INSERT_HEIGHT = 44;
 const DEFAULT_SHAPE_SIZE = 160;
 const DEFAULT_LINE_WIDTH = 280;
 const DEFAULT_LINE_HEIGHT = 4;
@@ -24,12 +25,17 @@ const DEFAULT_TABLE_COLUMNS = 3;
 const MAX_TABLE_GRID_SIZE = 10;
 const HISTORY_LIMIT = 100;
 
-type InsertShapeType = "rect" | "ellipse" | "line" | "arrow";
+export type InsertShapeType = "rect" | "ellipse" | "line" | "arrow";
 type BorderLineStyle = "solid" | "dashed" | "dotted";
 type SnapGuides = {
   vertical: number | null;
   horizontal: number | null;
 };
+
+export type PendingInsertion =
+  | { type: "shape"; shapeType: InsertShapeType }
+  | { type: "text"; preset: TextPresetType }
+  | { type: "table"; rows: number; columns: number };
 
 type EditableSlideShape = {
   id: string;
@@ -54,10 +60,12 @@ type SlideEditorState = {
   clipboardShape: EditableSlideShape | null;
   selectedShapeId: string | null;
   editingShapeId: string | null;
+  pendingInsertion: PendingInsertion | null;
   snapGuides: SnapGuides;
   initializeSlide: (slideIndex: number, model: SlideDocumentModel) => void;
   selectShape: (shapeId: string | null) => void;
   setEditingShape: (shapeId: string | null) => void;
+  setPendingInsertion: (insertion: PendingInsertion | null) => void;
   setPreviewMode: (value: boolean) => void;
   updateShapePosition: (shapeId: string, topLeftX: number, topLeftY: number) => void;
   updateShapeSize: (shapeId: string, width: number, height: number) => void;
@@ -75,9 +83,9 @@ type SlideEditorState = {
   copySelectedShape: () => void;
   pasteCopiedShape: () => void;
   deleteSelectedShape: () => void;
-  insertTextPreset: (preset: TextPresetType) => void;
-  insertShape: (shapeType: InsertShapeType) => void;
-  insertTable: (rows?: number, columns?: number) => void;
+  insertTextPreset: (preset: TextPresetType, position?: { x: number; y: number }) => void;
+  insertShape: (shapeType: InsertShapeType, position?: { x: number; y: number }) => void;
+  insertTable: (rows?: number, columns?: number, position?: { x: number; y: number }) => void;
   setSnapGuides: (guides: SnapGuides) => void;
   clearSnapGuides: () => void;
   bringToFront: () => void;
@@ -175,7 +183,18 @@ function createId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function toInsertPosition(width: number, height: number): Pick<ShapeAttributes, "topLeftX" | "topLeftY"> {
+function toInsertPosition(
+  width: number,
+  height: number,
+  center?: { x: number; y: number },
+): Pick<ShapeAttributes, "topLeftX" | "topLeftY"> {
+  if (center) {
+    return {
+      topLeftX: round2(center.x - width / 2),
+      topLeftY: round2(center.y - height / 2),
+    };
+  }
+
   return {
     topLeftX: round2((SLIDE_WIDTH - width) / 2),
     topLeftY: round2((SLIDE_HEIGHT - height) / 2),
@@ -191,20 +210,9 @@ function getNextZIndex(shapes: EditableSlideShape[]): number {
 }
 
 function buildTextPresetContentNode(preset: TextPresetType): XmlNode {
-  const presetMap: Record<
-    TextPresetType,
-    { text: string; fontSize: number; fontFamily: string; bold: boolean }
-  > = {
-    display: { text: "大标题", fontSize: 44, fontFamily: "Montserrat", bold: true },
-    title: { text: "标题", fontSize: 32, fontFamily: "Montserrat", bold: true },
-    subtitle: { text: "副标题", fontSize: 24, fontFamily: "Montserrat", bold: true },
-    body: { text: "正文", fontSize: 18, fontFamily: "Open Sans", bold: false },
-    "body-small": { text: "小号正文", fontSize: 14, fontFamily: "Open Sans", bold: false },
-  };
-
-  const presetStyle = presetMap[preset];
+  const presetStyle = TEXT_PRESET_MAP[preset];
   const spanNode: XmlNode = {
-    "#text": presetStyle.text,
+    "#text": presetStyle.sampleText,
     "@_fontSize": presetStyle.fontSize,
     "@_fontFamily": presetStyle.fontFamily,
     "@_color": "rgba(31, 35, 41, 1)",
@@ -321,6 +329,7 @@ function createEditableShape(params: {
   type: ShapeAttributes["type"];
   width: number;
   height: number;
+  position?: { x: number; y: number };
   style?: ShapeStyle;
   rawNode: XmlNode;
   contentNode?: XmlNode;
@@ -332,7 +341,7 @@ function createEditableShape(params: {
     width: params.width,
     height: params.height,
     rotation: 0,
-    ...toInsertPosition(params.width, params.height),
+    ...toInsertPosition(params.width, params.height, params.position),
   });
   const mergedRawNode: XmlNode = {
     ...params.rawNode,
@@ -392,6 +401,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
   clipboardShape: null,
   selectedShapeId: null,
   editingShapeId: null,
+  pendingInsertion: null,
   snapGuides: { vertical: null, horizontal: null },
   historyPast: [],
   historyFuture: [],
@@ -405,6 +415,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
         },
         selectedShapeId: null,
         editingShapeId: null,
+        pendingInsertion: null,
         snapGuides: { vertical: null, horizontal: null },
         historyPast: [],
         historyFuture: [],
@@ -433,6 +444,13 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
   setEditingShape: (shapeId) => {
     set(() => ({ editingShapeId: shapeId }));
   },
+  setPendingInsertion: (insertion) => {
+    set(() => ({
+      pendingInsertion: insertion,
+      selectedShapeId: insertion ? null : get().selectedShapeId,
+      editingShapeId: insertion ? null : get().editingShapeId,
+    }));
+  },
   setPreviewMode: (value) => {
     set(() => ({
       isPreviewMode: value,
@@ -460,8 +478,9 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
   updateShapeSize: (shapeId, width, height) => {
     set((state) => ({
       shapes: updateShape(state.shapes, shapeId, (shape) => {
-        const maxWidth = SLIDE_WIDTH - shape.attributes.topLeftX;
-        const maxHeight = SLIDE_HEIGHT - shape.attributes.topLeftY;
+        const isTextShape = shape.attributes.type === "text";
+        const maxWidth = isTextShape ? Number.POSITIVE_INFINITY : SLIDE_WIDTH - shape.attributes.topLeftX;
+        const maxHeight = isTextShape ? Number.POSITIVE_INFINITY : SLIDE_HEIGHT - shape.attributes.topLeftY;
 
         return {
           ...shape,
@@ -806,7 +825,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
       };
     });
   },
-  insertTextPreset: (preset) => {
+  insertTextPreset: (preset, position) => {
     set((state) => {
       const shapeId = createId("shape-text");
       const contentNode = buildTextPresetContentNode(preset);
@@ -815,6 +834,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
         type: "text",
         width: DEFAULT_INSERT_WIDTH,
         height: DEFAULT_INSERT_HEIGHT,
+        position,
         rawNode: {
           fill: {
             fillColor: {
@@ -833,15 +853,18 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
       };
     });
   },
-  insertShape: (shapeType) => {
+  insertShape: (shapeType, position) => {
     set((state) => {
       const shapeId = createId(`shape-${shapeType}`);
       const isLineLike = shapeType === "line" || shapeType === "arrow";
+      const width = isLineLike ? DEFAULT_LINE_WIDTH : DEFAULT_SHAPE_SIZE;
+      const height = isLineLike ? DEFAULT_LINE_HEIGHT : DEFAULT_SHAPE_SIZE;
       const nextShape = createEditableShape({
         id: shapeId,
         type: shapeType,
-        width: isLineLike ? DEFAULT_LINE_WIDTH : DEFAULT_SHAPE_SIZE,
-        height: isLineLike ? DEFAULT_LINE_HEIGHT : DEFAULT_SHAPE_SIZE,
+        width,
+        height,
+        position,
         style: shapeType === "ellipse" ? { borderRadius: "9999px" } : {},
         rawNode: {
           fill: {
@@ -864,7 +887,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
       };
     });
   },
-  insertTable: (rows = DEFAULT_TABLE_ROWS, columns = DEFAULT_TABLE_COLUMNS) => {
+  insertTable: (rows = DEFAULT_TABLE_ROWS, columns = DEFAULT_TABLE_COLUMNS, position) => {
     set((state) => {
       const shapeId = createId("shape-table");
       const safeRows = Math.min(MAX_TABLE_GRID_SIZE, Math.max(1, rows));
@@ -877,6 +900,7 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
         type: "table",
         width,
         height,
+        position,
         rawNode: {
           border: {
             "@_color": "rgba(31, 35, 41, 0.25)",

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { SlideShape } from "@/features/deck-editor/components/slide-shape";
 import { useSlideEditorStore } from "@/features/slide-editor/store";
 import { parseSlideXml } from "@/lib/slide-xml/parser";
+import { cn } from "@/lib/utils";
 
 const DEFAULT_SLIDE_INDEX = 0;
 const DEFAULT_ZOOM = 65;
@@ -38,6 +39,11 @@ export function SlideViewport({
   const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
   const storedShapes = useSlideEditorStore((state) => state.shapes);
   const snapGuides = useSlideEditorStore((state) => state.snapGuides);
+  const pendingInsertion = useSlideEditorStore((state) => state.pendingInsertion);
+  const setPendingInsertion = useSlideEditorStore((state) => state.setPendingInsertion);
+  const insertShape = useSlideEditorStore((state) => state.insertShape);
+  const insertTextPreset = useSlideEditorStore((state) => state.insertTextPreset);
+  const insertTable = useSlideEditorStore((state) => state.insertTable);
   const interactiveShapes = useMemo(
     () => [...storedShapes].sort((a, b) => a.zIndex - b.zIndex),
     [storedShapes],
@@ -45,7 +51,7 @@ export function SlideViewport({
   const safeZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
   const viewportWidth = (BASE_VIEWPORT_WIDTH * safeZoom) / 100;
   const shouldUseStoreShapes = !forceModelRender && isHydrated && currentSlideIndex === slideIndex;
-  const interactiveEnabled = shouldUseStoreShapes && !isPreviewMode;
+  const interactiveEnabled = shouldUseStoreShapes && !isPreviewMode && !pendingInsertion;
 
   useEffect(() => {
     initializeSlide(slideIndex, model);
@@ -88,8 +94,35 @@ export function SlideViewport({
         <div className="mx-auto w-full max-w-[960px] [container-type:inline-size]">
           <div
             ref={viewportRef}
-            className="relative aspect-[16/9] w-full overflow-visible rounded-xl bg-white shadow-[0_8px_30px_rgba(15,23,42,0.08)] [--slide-unit:calc(100cqw/960)]"
+            className={cn(
+              "relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-white shadow-[0_8px_30px_rgba(15,23,42,0.08)] [--slide-unit:calc(100cqw/960)]",
+              pendingInsertion && "cursor-crosshair",
+            )}
             onPointerDown={(event) => {
+              if (pendingInsertion) {
+                event.preventDefault();
+                event.stopPropagation();
+
+                const rect = event.currentTarget.getBoundingClientRect();
+                const scaleX = 960 / rect.width;
+                const scaleY = 540 / rect.height;
+                const x = (event.clientX - rect.left) * scaleX;
+                const y = (event.clientY - rect.top) * scaleY;
+
+                const position = { x, y };
+
+                if (pendingInsertion.type === "shape") {
+                  insertShape(pendingInsertion.shapeType, position);
+                } else if (pendingInsertion.type === "text") {
+                  insertTextPreset(pendingInsertion.preset, position);
+                } else if (pendingInsertion.type === "table") {
+                  insertTable(pendingInsertion.rows, pendingInsertion.columns, position);
+                }
+
+                setPendingInsertion(null);
+                return;
+              }
+
               if (event.target === event.currentTarget) {
                 if (!isPreviewMode) {
                   selectShape(null);

@@ -28,6 +28,7 @@ import {
   useUpdateDeckTitle,
 } from "@/features/deck-editor/hooks/use-deck-editor-api";
 import { useSlideEditorStore } from "@/features/slide-editor/store";
+import { TEXT_PRESET_OPTIONS } from "@/features/slide-editor/text-preset-config";
 import type { DeckEntity, PersistedSlide, SaveStatus, SlideRevisionEntity } from "@/features/deck-editor/types";
 import { serializeSlideDocument } from "@/lib/slide-xml/serializer";
 import {
@@ -473,11 +474,10 @@ function Toolbar({
   isPreviewingRevision: boolean;
 }) {
   const selectedShapeId = useSlideEditorStore((state) => state.selectedShapeId);
+  const pendingInsertion = useSlideEditorStore((state) => state.pendingInsertion);
+  const setPendingInsertion = useSlideEditorStore((state) => state.setPendingInsertion);
   const bringToFront = useSlideEditorStore((state) => state.bringToFront);
   const sendToBack = useSlideEditorStore((state) => state.sendToBack);
-  const insertTextPreset = useSlideEditorStore((state) => state.insertTextPreset);
-  const insertShape = useSlideEditorStore((state) => state.insertShape);
-  const insertTable = useSlideEditorStore((state) => state.insertTable);
   const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
   const copySelectedShape = useSlideEditorStore((state) => state.copySelectedShape);
   const pasteCopiedShape = useSlideEditorStore((state) => state.pasteCopiedShape);
@@ -504,6 +504,12 @@ function Toolbar({
         !!target?.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select";
 
       if (isTypingTarget) {
+        return;
+      }
+
+      if (event.key === "Escape" && pendingInsertion) {
+        event.preventDefault();
+        setPendingInsertion(null);
         return;
       }
 
@@ -540,7 +546,7 @@ function Toolbar({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [copySelectedShape, deleteSelectedShape, isPreviewMode, pasteCopiedShape, redo, undo]);
+  }, [copySelectedShape, deleteSelectedShape, isPreviewMode, pasteCopiedShape, pendingInsertion, redo, setPendingInsertion, undo]);
 
   return (
     <div data-editor-toolbar="true" className="max-w-full overflow-x-auto">
@@ -572,26 +578,51 @@ function Toolbar({
           icon={<Type className="h-4 w-4" />}
           label="文本"
           disabled={isPreviewMode}
-          items={[
-            { label: "大标题", onClick: () => insertTextPreset("display") },
-            { label: "标题", onClick: () => insertTextPreset("title") },
-            { label: "副标题", onClick: () => insertTextPreset("subtitle") },
-            { label: "正文", onClick: () => insertTextPreset("body") },
-            { label: "小号正文", onClick: () => insertTextPreset("body-small") },
-          ]}
+          isActive={pendingInsertion?.type === "text"}
+          items={TEXT_PRESET_OPTIONS.map((option) => {
+            const previewSize = Math.max(12, Math.min(28, Math.round(option.fontSize * 0.72)));
+            const weightLabel = option.bold ? "Bold" : "Regular";
+
+            return {
+              key: option.preset,
+              label: (
+                <div className="flex w-full items-end justify-between gap-2">
+                  <span
+                    style={{
+                      fontFamily: option.fontFamily,
+                      fontSize: `${previewSize}px`,
+                      fontWeight: option.fontWeight,
+                      lineHeight: 1.15,
+                    }}
+                  >
+                    {option.label}
+                  </span>
+                  <span className="shrink-0 text-[10px] font-medium tabular-nums text-slate-400">
+                    {option.fontSize}/{weightLabel}
+                  </span>
+                </div>
+              ),
+              onClick: () => setPendingInsertion({ type: "text", preset: option.preset }),
+            };
+          })}
         />
         <ToolbarMenu
           icon={<Shapes className="h-4 w-4" />}
           label="图形"
           disabled={isPreviewMode}
+          isActive={pendingInsertion?.type === "shape"}
           items={[
-            { label: "矩形", onClick: () => insertShape("rect") },
-            { label: "圆", onClick: () => insertShape("ellipse") },
-            { label: "直线", onClick: () => insertShape("line") },
-            { label: "单向箭头", onClick: () => insertShape("arrow") },
+            { key: "rect", label: "矩形", onClick: () => setPendingInsertion({ type: "shape", shapeType: "rect" }) },
+            { key: "ellipse", label: "圆", onClick: () => setPendingInsertion({ type: "shape", shapeType: "ellipse" }) },
+            { key: "line", label: "直线", onClick: () => setPendingInsertion({ type: "shape", shapeType: "line" }) },
+            { key: "arrow", label: "单向箭头", onClick: () => setPendingInsertion({ type: "shape", shapeType: "arrow" }) },
           ]}
         />
-        <TableInsertGridMenu disabled={isPreviewMode} onInsert={insertTable} />
+        <TableInsertGridMenu
+          disabled={isPreviewMode}
+          isActive={pendingInsertion?.type === "table"}
+          onInsert={(rows, columns) => setPendingInsertion({ type: "table", rows, columns })}
+        />
 
         <div className="mx-1.5 h-6 w-px bg-slate-200" />
 
@@ -747,11 +778,13 @@ function ToolbarMenu({
   label,
   items,
   disabled,
+  isActive,
 }: {
   icon: ReactNode;
   label: string;
-  items: { label: string; onClick: () => void }[];
+  items: { key: string; label: ReactNode; onClick: () => void }[];
   disabled?: boolean;
+  isActive?: boolean;
 }) {
   return (
     <DropdownMenu>
@@ -759,7 +792,11 @@ function ToolbarMenu({
         <button
           type="button"
           disabled={disabled}
-          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
+          className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400 ${
+            isActive
+              ? "bg-sky-100 text-sky-700 hover:bg-sky-200/80"
+              : "text-slate-700 hover:bg-slate-100/80"
+          }`}
         >
           {icon}
           <span className="hidden md:inline">{label}</span>
@@ -770,7 +807,7 @@ function ToolbarMenu({
         <DropdownMenuLabel>{label}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {items.map((item) => (
-          <DropdownMenuItem key={item.label} onSelect={item.onClick}>
+          <DropdownMenuItem key={item.key} onSelect={item.onClick} className="py-2">
             {item.label}
           </DropdownMenuItem>
         ))}
@@ -782,9 +819,11 @@ function ToolbarMenu({
 function TableInsertGridMenu({
   onInsert,
   disabled,
+  isActive,
 }: {
   onInsert: (rows: number, columns: number) => void;
   disabled?: boolean;
+  isActive?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [hoverRows, setHoverRows] = useState(1);
@@ -805,7 +844,11 @@ function TableInsertGridMenu({
         <button
           type="button"
           disabled={disabled}
-          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
+          className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400 ${
+            isActive
+              ? "bg-sky-100 text-sky-700 hover:bg-sky-200/80"
+              : "text-slate-700 hover:bg-slate-100/80"
+          }`}
         >
           <Table2 className="h-4 w-4" />
           <span className="hidden md:inline">表格</span>

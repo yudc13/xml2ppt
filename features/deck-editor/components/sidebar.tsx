@@ -157,7 +157,7 @@ function ExpandedSlideThumbnail({
       >
         <div className="flex h-full items-center justify-center overflow-hidden rounded-md border border-slate-100/50 bg-slate-50 p-1">
           <div className="h-full max-w-full [container-type:inline-size] aspect-[16/9]">
-            <div className="relative h-full w-full overflow-hidden rounded-[4px] bg-white [--slide-unit:calc((100cqw/960)*0.7)]">
+            <div className="relative h-full w-full overflow-hidden rounded-[4px] bg-white [--slide-unit:calc(100cqw/960)] [--slide-font-scale:1.7]">
               {previewShapes.map((shape) => (
                 <SlideShape
                   key={("id" in shape ? shape.id : shape.attributes.id) as string}
