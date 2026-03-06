@@ -4,7 +4,13 @@ import Link from "next/link";
 import Image from "next/image";
 import { UserButton } from "@clerk/nextjs";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, CircleAlert, Eye, EyeOff, History, Loader2, Save, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Eye, EyeOff, History, Loader2, MonitorPlay, Save, X } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type HeaderProps = {
   title: string;
@@ -14,11 +20,17 @@ type HeaderProps = {
   onSave?: () => void;
   onOpenHistory?: () => void;
   onTogglePreview?: () => void;
+  onPlay?: () => void;
+  onExportPdf?: () => void;
+  onExportPptx?: () => void;
   isSaving?: boolean;
+  isExporting?: boolean;
   saveStatus?: "idle" | "success" | "error" | "conflict";
   isDirty?: boolean;
   isPreviewMode?: boolean;
   disableSave?: boolean;
+  disablePlay?: boolean;
+  disableExport?: boolean;
 };
 
 export function Header({
@@ -29,11 +41,17 @@ export function Header({
   onSave,
   onOpenHistory,
   onTogglePreview,
+  onPlay,
+  onExportPdf,
+  onExportPptx,
   isSaving = false,
+  isExporting = false,
   saveStatus = "idle",
   isDirty = false,
   isPreviewMode = false,
   disableSave = false,
+  disablePlay = false,
+  disableExport = false,
 }: HeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
@@ -234,6 +252,35 @@ export function Header({
             {isPreviewMode ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
             {isPreviewMode ? "退出预览" : "预览"}
           </button>
+          <button
+            type="button"
+            onClick={onPlay}
+            disabled={disablePlay}
+            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
+          >
+            <MonitorPlay className="h-3.5 w-3.5" />
+            播放
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                disabled={disableExport || isExporting}
+                className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
+              >
+                {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                导出
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={isExporting} onClick={onExportPdf}>
+                导出 PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={isExporting} onClick={onExportPptx}>
+                导出 PPTX
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className="ml-1 shrink-0 rounded-xl border border-slate-200 bg-white p-0.5 shadow-[0_1px_4px_rgba(15,23,42,0.05)]">

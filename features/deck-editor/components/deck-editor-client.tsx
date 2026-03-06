@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { Header } from "@/features/deck-editor/components/header";
+import { PresentationPlayer } from "@/features/deck-editor/components/presentation-player";
 import { Sidebar } from "@/features/deck-editor/components/sidebar";
 import { SlideViewport } from "@/features/deck-editor/components/slide-viewport";
 import {
@@ -31,6 +32,8 @@ import { useSlideEditorStore } from "@/features/slide-editor/store";
 import { TEXT_PRESET_OPTIONS } from "@/features/slide-editor/text-preset-config";
 import type { DeckEntity, PersistedSlide, SaveStatus, SlideRevisionEntity } from "@/features/deck-editor/types";
 import { serializeSlideDocument } from "@/lib/slide-xml/serializer";
+import { exportSlidesToPdf } from "@/features/deck-editor/lib/export/export-pdf";
+import { exportSlidesToPptx } from "@/features/deck-editor/lib/export/export-pptx";
 import {
   SidebarInset,
   SidebarProvider,
@@ -95,6 +98,9 @@ export function DeckEditorClient({
   const [revisionError, setRevisionError] = useState<string | null>(null);
   const [previewRevisionVersion, setPreviewRevisionVersion] = useState<number | null>(null);
   const [previewRevisionXml, setPreviewRevisionXml] = useState<string | null>(null);
+  const [isPlayerOpen, setIsPlayerOpen] = useState(false);
+  const [playerSessionKey, setPlayerSessionKey] = useState(0);
+  const [isExporting, setIsExporting] = useState<null | "pdf" | "pptx">(null);
   const saveStatusTimeoutRef = useRef<number | null>(null);
 
   const activeSlide = slides[activeSlideIndex] ?? null;
@@ -158,6 +164,45 @@ export function DeckEditorClient({
     saveStatusTimeoutRef.current = window.setTimeout(() => {
       setSaveStatus("idle");
     }, 1500);
+  };
+
+  const sanitizeFileName = (value: string) => {
+    const trimmed = value.trim().replace(/[\\/:*?"<>|]/g, "_");
+    return trimmed || "deck-export";
+  };
+
+  const getFormalSlideXmlList = () => {
+    return slides.map((slide, index) => {
+      if (index !== activeSlideIndex || previewRevisionVersion !== null) {
+        return slide.xmlContent;
+      }
+
+      if (currentSlideIndexInStore !== activeSlideIndex) {
+        return slide.xmlContent;
+      }
+
+      const model = buildSlideDocumentModel();
+      if (!model) {
+        return slide.xmlContent;
+      }
+
+      return serializeSlideDocument(model);
+    });
+  };
+
+  const ensureExportableState = async () => {
+    if (previewRevisionVersion !== null) {
+      window.alert("请先退出历史版本预览，再进行播放或导出。");
+      return false;
+    }
+
+    const persisted = await persistActiveSlide();
+    if (!persisted) {
+      window.alert("当前页面保存失败，请处理后重试。");
+      return false;
+    }
+
+    return true;
   };
 
   const persistActiveSlide = async (options?: { showStatus?: boolean }) => {
@@ -354,6 +399,48 @@ export function DeckEditorClient({
     void persistActiveSlide({ showStatus: true });
   };
 
+  const handlePlay = () => {
+    void (async () => {
+      const ok = await ensureExportableState();
+      if (!ok) {
+        return;
+      }
+
+      setPlayerSessionKey((prev) => prev + 1);
+      setIsPlayerOpen(true);
+    })();
+  };
+
+  const handleExport = (format: "pdf" | "pptx") => {
+    if (isExporting) {
+      return;
+    }
+
+    void (async () => {
+      const ok = await ensureExportableState();
+      if (!ok) {
+        return;
+      }
+
+      const fileBaseName = sanitizeFileName(deckTitle);
+      const xmlList = getFormalSlideXmlList();
+      setIsExporting(format);
+
+      try {
+        if (format === "pdf") {
+          await exportSlidesToPdf(xmlList, fileBaseName);
+        } else {
+          await exportSlidesToPptx(xmlList, fileBaseName);
+        }
+      } catch (error) {
+        console.error("Export failed", error);
+        window.alert("导出失败，请稍后重试。");
+      } finally {
+        setIsExporting(null);
+      }
+    })();
+  };
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#f2f4f7] font-sans text-slate-900">
       <Header
@@ -372,11 +459,17 @@ export function DeckEditorClient({
         onSave={handleManualSave}
         onOpenHistory={handleOpenHistory}
         onTogglePreview={() => setPreviewMode(!isPreviewMode)}
+        onPlay={handlePlay}
+        onExportPdf={() => handleExport("pdf")}
+        onExportPptx={() => handleExport("pptx")}
         isSaving={saveSlide.isPending}
+        isExporting={isExporting !== null}
         saveStatus={saveStatus}
         isDirty={isDirty}
         isPreviewMode={isPreviewMode}
         disableSave={previewRevisionVersion !== null}
+        disablePlay={previewRevisionVersion !== null}
+        disableExport={previewRevisionVersion !== null}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -426,6 +519,13 @@ export function DeckEditorClient({
           </SidebarInset>
         </SidebarProvider>
       </div>
+
+      <PresentationPlayer
+        key={playerSessionKey}
+        open={isPlayerOpen}
+        slideXmlList={getFormalSlideXmlList()}
+        onClose={() => setIsPlayerOpen(false)}
+      />
     </div>
   );
 }
