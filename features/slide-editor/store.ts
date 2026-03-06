@@ -52,17 +52,28 @@ type HistorySnapshot = {
   editingShapeId: string | null;
 };
 
+type SlideDraftState = {
+  currentSlideMeta: Pick<SlideDocumentModel, "slideId" | "rawSlideNode">;
+  sourceXml: string;
+  shapes: EditableSlideShape[];
+  historyPast: HistorySnapshot[];
+  historyFuture: HistorySnapshot[];
+};
+
 type SlideEditorState = {
   currentSlideIndex: number | null;
   currentSlideMeta: Pick<SlideDocumentModel, "slideId" | "rawSlideNode"> | null;
+  currentSlideSourceXml: string;
   isPreviewMode: boolean;
+  slideDrafts: Record<string, SlideDraftState>;
   shapes: EditableSlideShape[];
   clipboardShape: EditableSlideShape | null;
   selectedShapeId: string | null;
   editingShapeId: string | null;
   pendingInsertion: PendingInsertion | null;
   snapGuides: SnapGuides;
-  initializeSlide: (slideIndex: number, model: SlideDocumentModel) => void;
+  initializeSlide: (slideIndex: number, model: SlideDocumentModel, sourceXml?: string) => void;
+  getSlideDraftShapes: (slideId: string) => EditableSlideShape[] | null;
   selectShape: (shapeId: string | null) => void;
   setEditingShape: (shapeId: string | null) => void;
   setPendingInsertion: (insertion: PendingInsertion | null) => void;
@@ -123,6 +134,25 @@ function normalizeShapeAttributes(attributes: ShapeAttributes): ShapeAttributes 
     topLeftY: round2(clamp(attributes.topLeftY, 0, SLIDE_HEIGHT - height)),
     rotation: normalizeRotation(attributes.rotation),
   };
+}
+
+function toEditableShapes(model: SlideDocumentModel): EditableSlideShape[] {
+  return model.shapes.map((shape, index) => {
+    const normalizedAttributes = normalizeShapeAttributes(shape.attributes);
+    const normalizedRawNode = {
+      ...shape.rawNode,
+      "@_rotation": normalizedAttributes.rotation,
+    };
+
+    return {
+      id: shape.attributes.id,
+      attributes: normalizedAttributes,
+      style: shape.style,
+      rawNode: normalizedRawNode,
+      contentHtml: shape.rawNode.content ? buildShapeContentHtml(shape.rawNode.content) : "",
+      zIndex: index,
+    };
+  });
 }
 
 function toHistorySnapshot(state: SlideEditorState): HistorySnapshot {
@@ -396,7 +426,9 @@ function cloneShapeForDuplicate(source: EditableSlideShape, offset = 24): Editab
 export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
   currentSlideIndex: null,
   currentSlideMeta: null,
+  currentSlideSourceXml: "",
   isPreviewMode: false,
+  slideDrafts: {},
   shapes: [],
   clipboardShape: null,
   selectedShapeId: null,
@@ -405,38 +437,61 @@ export const useSlideEditorStore = create<SlideEditorState>((set, get) => ({
   snapGuides: { vertical: null, horizontal: null },
   historyPast: [],
   historyFuture: [],
-  initializeSlide: (slideIndex, model) => {
-    set(() => {
+  initializeSlide: (slideIndex, model, sourceXml = "") => {
+    set((state) => {
+      const nextDrafts = { ...state.slideDrafts };
+      if (state.currentSlideMeta) {
+        nextDrafts[state.currentSlideMeta.slideId] = {
+          currentSlideMeta: state.currentSlideMeta,
+          sourceXml: state.currentSlideSourceXml,
+          shapes: structuredClone(state.shapes),
+          historyPast: structuredClone(state.historyPast),
+          historyFuture: structuredClone(state.historyFuture),
+        };
+      }
+
+      const existingDraft = nextDrafts[model.slideId];
+      const shouldReuseDraft = existingDraft && existingDraft.sourceXml === sourceXml;
+      const nextShapes = shouldReuseDraft ? existingDraft.shapes : toEditableShapes(model);
+      const nextHistoryPast = shouldReuseDraft ? existingDraft.historyPast : [];
+      const nextHistoryFuture = shouldReuseDraft ? existingDraft.historyFuture : [];
+
+      nextDrafts[model.slideId] = {
+        currentSlideMeta: {
+          slideId: model.slideId,
+          rawSlideNode: model.rawSlideNode,
+        },
+        sourceXml,
+        shapes: structuredClone(nextShapes),
+        historyPast: structuredClone(nextHistoryPast),
+        historyFuture: structuredClone(nextHistoryFuture),
+      };
+
       return {
         currentSlideIndex: slideIndex,
         currentSlideMeta: {
           slideId: model.slideId,
           rawSlideNode: model.rawSlideNode,
         },
+        currentSlideSourceXml: sourceXml,
+        slideDrafts: nextDrafts,
         selectedShapeId: null,
         editingShapeId: null,
         pendingInsertion: null,
         snapGuides: { vertical: null, horizontal: null },
-        historyPast: [],
-        historyFuture: [],
-        shapes: model.shapes.map((shape, index) => {
-          const normalizedAttributes = normalizeShapeAttributes(shape.attributes);
-          const normalizedRawNode = {
-            ...shape.rawNode,
-            "@_rotation": normalizedAttributes.rotation,
-          };
-
-          return {
-            id: shape.attributes.id,
-            attributes: normalizedAttributes,
-            style: shape.style,
-            rawNode: normalizedRawNode,
-            contentHtml: shape.rawNode.content ? buildShapeContentHtml(shape.rawNode.content) : "",
-            zIndex: index,
-          };
-        }),
+        historyPast: structuredClone(nextHistoryPast),
+        historyFuture: structuredClone(nextHistoryFuture),
+        shapes: structuredClone(nextShapes),
       };
     });
+  },
+  getSlideDraftShapes: (slideId) => {
+    const draft = get().slideDrafts[slideId];
+    if (!draft) {
+      return null;
+    }
+
+    return draft.shapes;
   },
   selectShape: (shapeId) => {
     set(() => ({ selectedShapeId: shapeId }));

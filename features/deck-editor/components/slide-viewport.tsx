@@ -54,8 +54,8 @@ export function SlideViewport({
   const interactiveEnabled = shouldUseStoreShapes && !isPreviewMode && !pendingInsertion;
 
   useEffect(() => {
-    initializeSlide(slideIndex, model);
-  }, [initializeSlide, model, slideIndex]);
+    initializeSlide(slideIndex, model, slideXml ?? "");
+  }, [initializeSlide, model, slideIndex, slideXml]);
 
   useEffect(() => {
     const onWindowPointerDown = (event: PointerEvent) => {

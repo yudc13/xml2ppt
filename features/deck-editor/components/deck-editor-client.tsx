@@ -383,8 +383,12 @@ export function DeckEditorClient({
         <SidebarProvider defaultOpen>
           <Sidebar
             slides={slideNumbers}
+            slideIdList={slides.map((slide) => slide.id)}
             slideXmlList={slides.map((slide) => slide.xmlContent)}
             activeSlide={activeSlideIndex + 1}
+            activeSlideId={activeSlide?.id}
+            activeSlideRenderXml={currentSlideXml}
+            forceActiveSlideModelRender={previewRevisionVersion !== null}
             onSlideSelect={handleSelectSlide}
             onCreateSlide={handleCreateSlide}
           />

@@ -18,16 +18,24 @@ import { useMemo, useSyncExternalStore } from "react";
 
 interface SidebarProps {
   slides: number[];
+  slideIdList: string[];
   slideXmlList: string[];
   activeSlide?: number;
+  activeSlideId?: string;
+  activeSlideRenderXml?: string;
+  forceActiveSlideModelRender?: boolean;
   onSlideSelect?: (slideNumber: number) => void;
   onCreateSlide?: () => void;
 }
 
 export function Sidebar({
   slides,
+  slideIdList,
   slideXmlList,
   activeSlide = 1,
+  activeSlideId,
+  activeSlideRenderXml,
+  forceActiveSlideModelRender = false,
   onSlideSelect,
   onCreateSlide,
 }: SidebarProps) {
@@ -58,8 +66,12 @@ export function Sidebar({
                 key={slide}
                 number={slide}
                 slideIndex={index}
+                slideId={slideIdList[index]}
                 slideXml={slideXmlList[index]}
                 isActive={slide === activeSlide}
+                activeSlideId={activeSlideId}
+                activeSlideRenderXml={activeSlideRenderXml}
+                forceActiveSlideModelRender={forceActiveSlideModelRender}
                 onSelect={onSlideSelect}
               />
             ))}
@@ -100,14 +112,22 @@ function CollapsedSlideButton({
 function ExpandedSlideThumbnail({
   number,
   slideIndex,
+  slideId,
   slideXml,
   isActive,
+  activeSlideId,
+  activeSlideRenderXml,
+  forceActiveSlideModelRender,
   onSelect,
 }: {
   number: number;
   slideIndex: number;
+  slideId?: string;
   slideXml?: string;
   isActive: boolean;
+  activeSlideId?: string;
+  activeSlideRenderXml?: string;
+  forceActiveSlideModelRender: boolean;
   onSelect?: (slideNumber: number) => void;
 }) {
   const isHydrated = useSyncExternalStore(
@@ -117,22 +137,41 @@ function ExpandedSlideThumbnail({
   );
   const currentSlideIndex = useSlideEditorStore((state) => state.currentSlideIndex);
   const storedShapes = useSlideEditorStore((state) => state.shapes);
+  const draftShapes = useSlideEditorStore((state) =>
+    slideId ? state.slideDrafts[slideId]?.shapes ?? null : null,
+  );
+
+  const isActiveDraftSlide = Boolean(slideId && activeSlideId && slideId === activeSlideId);
+  const effectiveSlideXml = isActiveDraftSlide && activeSlideRenderXml ? activeSlideRenderXml : slideXml;
 
   const parsedShapes = useMemo(() => {
-    if (!slideXml) {
+    if (!effectiveSlideXml) {
       return [];
     }
 
-    return parseSlideXml(slideXml).shapes;
-  }, [slideXml]);
+    return parseSlideXml(effectiveSlideXml).shapes;
+  }, [effectiveSlideXml]);
 
   const previewShapes = useMemo(() => {
-    if (isHydrated && isActive && currentSlideIndex === slideIndex) {
+    if (isHydrated && isActive && currentSlideIndex === slideIndex && !forceActiveSlideModelRender) {
       return [...storedShapes].sort((a, b) => a.zIndex - b.zIndex);
     }
 
+    if (draftShapes) {
+      return [...draftShapes].sort((a, b) => a.zIndex - b.zIndex);
+    }
+
     return parsedShapes;
-  }, [currentSlideIndex, isActive, isHydrated, parsedShapes, slideIndex, storedShapes]);
+  }, [
+    currentSlideIndex,
+    draftShapes,
+    forceActiveSlideModelRender,
+    isActive,
+    isHydrated,
+    parsedShapes,
+    slideIndex,
+    storedShapes,
+  ]);
 
   return (
     <div className="flex items-start gap-2 group-data-[collapsible=icon]:hidden">
@@ -157,7 +196,7 @@ function ExpandedSlideThumbnail({
       >
         <div className="flex h-full items-center justify-center overflow-hidden rounded-md border border-slate-100/50 bg-slate-50 p-1">
           <div className="h-full max-w-full [container-type:inline-size] aspect-[16/9]">
-            <div className="relative h-full w-full overflow-hidden rounded-[4px] bg-white [--slide-unit:calc(100cqw/960)] [--slide-font-scale:1.7]">
+            <div className="relative h-full w-full overflow-hidden rounded-[4px] bg-white [--slide-unit:calc(100cqw/960)]">
               {previewShapes.map((shape) => (
                 <SlideShape
                   key={("id" in shape ? shape.id : shape.attributes.id) as string}
@@ -175,14 +214,22 @@ function ExpandedSlideThumbnail({
 function SlideThumbnail({
   number,
   slideIndex,
+  slideId,
   slideXml,
   isActive,
+  activeSlideId,
+  activeSlideRenderXml,
+  forceActiveSlideModelRender,
   onSelect,
 }: {
   number: number;
   slideIndex: number;
+  slideId?: string;
   slideXml?: string;
   isActive: boolean;
+  activeSlideId?: string;
+  activeSlideRenderXml?: string;
+  forceActiveSlideModelRender: boolean;
   onSelect?: (slideNumber: number) => void;
 }) {
   return (
@@ -191,8 +238,12 @@ function SlideThumbnail({
       <ExpandedSlideThumbnail
         number={number}
         slideIndex={slideIndex}
+        slideId={slideId}
         slideXml={slideXml}
         isActive={isActive}
+        activeSlideId={activeSlideId}
+        activeSlideRenderXml={activeSlideRenderXml}
+        forceActiveSlideModelRender={forceActiveSlideModelRender}
         onSelect={onSelect}
       />
     </div>
