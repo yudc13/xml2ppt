@@ -22,7 +22,9 @@ import { SlideViewport } from "@/features/deck-editor/components/slide-viewport"
 import {
   ApiRequestError,
   useCreateSlide,
+  useDeleteSlide,
   useGetRevision,
+  useGetSlides,
   useLoadRevisions,
   useRollbackSlide,
   useSaveSlide,
@@ -58,6 +60,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { toast } from "sonner";
 
 const INITIAL_ACTIVE_SLIDE_INDEX = 0;
 const DEFAULT_ZOOM = 65;
@@ -86,6 +89,8 @@ export function DeckEditorClient({
   const loadRevisions = useLoadRevisions();
   const getRevision = useGetRevision();
   const rollbackSlide = useRollbackSlide();
+  const getSlides = useGetSlides(deckId);
+  const deleteSlideHook = useDeleteSlide();
 
   const [deckTitle, setDeckTitle] = useState(initialDeck.title);
   const [slides, setSlides] = useState<PersistedSlide[]>(initialSlides);
@@ -101,6 +106,8 @@ export function DeckEditorClient({
   const [isPlayerOpen, setIsPlayerOpen] = useState(false);
   const [playerSessionKey, setPlayerSessionKey] = useState(0);
   const [isExporting, setIsExporting] = useState<null | "pdf" | "pptx">(null);
+  const [slideClipboardXml, setSlideClipboardXml] = useState<string | null>(null);
+  const isSlideOperationPending = createSlide.isPending || deleteSlideHook.isPending || getSlides.isPending;
   const saveStatusTimeoutRef = useRef<number | null>(null);
 
   const activeSlide = slides[activeSlideIndex] ?? null;
@@ -371,28 +378,148 @@ export function DeckEditorClient({
     })();
   };
 
-  const handleCreateSlide = () => {
-    if (createSlide.isPending || saveSlide.isPending) {
+  const fetchAndSyncSlides = async (targetIndex?: number) => {
+    try {
+      const nextSlides = await getSlides.mutateAsync();
+      setSlides(nextSlides);
+      if (typeof targetIndex === "number") {
+        setActiveSlideIndex(Math.max(0, Math.min(nextSlides.length - 1, targetIndex)));
+      }
+    } catch {
+      setSaveStatus("error");
+    }
+  };
+
+  const handleCreateSlide = (atIndex?: number) => {
+    if (isSlideOperationPending || saveSlide.isPending) {
       return;
     }
 
-    void (async () => {
+    const promise = (async () => {
       const ok = await persistActiveSlide();
       if (!ok) {
-        return;
+        throw new Error("保存当前幻灯片失败");
       }
 
       try {
-        const created = await createSlide.mutateAsync();
+        const position = typeof atIndex === "number" ? atIndex + 2 : undefined;
+        await createSlide.mutateAsync({ position });
 
-        setSlides((prev) => [...prev, created]);
         resetRevisionState();
         setIsHistoryOpen(false);
-        setActiveSlideIndex(slides.length);
-      } catch {
-        setSaveStatus("error");
+        await fetchAndSyncSlides(typeof atIndex === "number" ? atIndex + 1 : slides.length);
+      } catch (err) {
+        throw err;
       }
     })();
+
+    toast.promise(promise, {
+      loading: "正在创建幻灯片...",
+      success: "幻灯片已创建",
+      error: "创建幻灯片失败",
+    });
+  };
+
+  const handleCopySlide = (index: number) => {
+    const slide = slides[index];
+    if (slide) {
+      setSlideClipboardXml(slide.xmlContent);
+      toast.success("已复制到剪贴板");
+    }
+  };
+
+  const handleCutSlide = (index: number) => {
+    const slide = slides[index];
+    if (slide) {
+      setSlideClipboardXml(slide.xmlContent);
+      void handleDeleteSlide(index, true);
+    }
+  };
+
+  const handlePasteSlide = (atIndex: number) => {
+    if (!slideClipboardXml || createSlide.isPending) return;
+
+    const promise = (async () => {
+      const ok = await persistActiveSlide();
+      if (!ok) throw new Error("保存当前幻灯片失败");
+
+      try {
+        await createSlide.mutateAsync({
+          xmlContent: slideClipboardXml,
+          position: atIndex + 2,
+        });
+        await fetchAndSyncSlides(atIndex + 1);
+      } catch (err) {
+        throw err;
+      }
+    })();
+
+    toast.promise(promise, {
+      loading: "正在粘贴幻灯片...",
+      success: "已粘贴幻灯片",
+      error: "粘贴幻灯片失败",
+    });
+  };
+
+  const handleDuplicateSlide = (index: number) => {
+    const slide = slides[index];
+    if (!slide || createSlide.isPending) return;
+
+    const promise = (async () => {
+      const ok = await persistActiveSlide();
+      if (!ok) throw new Error("保存当前幻灯片失败");
+
+      try {
+        await createSlide.mutateAsync({
+          xmlContent: slide.xmlContent,
+          position: index + 2,
+        });
+        await fetchAndSyncSlides(index + 1);
+      } catch (err) {
+        throw err;
+      }
+    })();
+
+    toast.promise(promise, {
+      loading: "正在复制幻灯片...",
+      success: "程序已复制幻灯片",
+      error: "复制幻灯片失败",
+    });
+  };
+
+  const handleDeleteSlide = async (index: number, isCut = false) => {
+    const slide = slides[index];
+    if (!slide || deleteSlideHook.isPending) return;
+
+    if (slides.length <= 1) {
+      toast.error("幻灯片数量不能少于 1 张");
+      return;
+    }
+
+    const promise = (async () => {
+      try {
+        await deleteSlideHook.mutateAsync(slide.id);
+
+        let nextIndex = activeSlideIndex;
+        if (index === activeSlideIndex) {
+          nextIndex = index === slides.length - 1 ? index - 1 : index;
+        } else if (index < activeSlideIndex) {
+          nextIndex = activeSlideIndex - 1;
+        }
+
+        await fetchAndSyncSlides(nextIndex);
+      } catch (err) {
+        throw err;
+      }
+    })();
+
+    if (!isCut) {
+      toast.promise(promise, {
+        loading: "正在删除幻灯片...",
+        success: "幻灯片已删除",
+        error: "删除幻灯片失败",
+      });
+    }
   };
 
   const handleManualSave = () => {
@@ -484,6 +611,13 @@ export function DeckEditorClient({
             forceActiveSlideModelRender={previewRevisionVersion !== null}
             onSlideSelect={handleSelectSlide}
             onCreateSlide={handleCreateSlide}
+            onCopySlide={handleCopySlide}
+            onCutSlide={handleCutSlide}
+            onPasteSlide={handlePasteSlide}
+            onDeleteSlide={handleDeleteSlide}
+            onDuplicateSlide={handleDuplicateSlide}
+            canPaste={!!slideClipboardXml}
+            isLoading={isSlideOperationPending}
           />
 
           <SidebarInset className="flex flex-1 flex-col overflow-auto bg-[#f8fafc]/50 p-8">
@@ -659,11 +793,11 @@ function Toolbar({
           ? "内容已过期，请刷新后重试"
           : isPreviewingRevision
             ? `正在预览历史版本 v${previewRevisionVersion}`
-          : isDirty
-            ? "有未保存修改"
-            : lastSavedAt
-              ? `上次保存：${new Date(lastSavedAt).toLocaleTimeString()}`
-              : ""}
+            : isDirty
+              ? "有未保存修改"
+              : lastSavedAt
+                ? `上次保存：${new Date(lastSavedAt).toLocaleTimeString()}`
+                : ""}
       </div>
       <div className="flex min-w-max items-center rounded-2xl border border-slate-200/90 bg-white/95 px-1.5 py-1 shadow-[0_1px_6px_rgba(15,23,42,0.05)] backdrop-blur supports-[backdrop-filter]:bg-white/80">
         <button
@@ -812,9 +946,8 @@ function Toolbar({
                   return (
                     <div
                       key={`${revision.slideId}-${revision.version}`}
-                      className={`rounded-xl border p-3 ${
-                        isPreview ? "border-sky-300 bg-sky-50/60" : "border-slate-200 bg-white"
-                      }`}
+                      className={`rounded-xl border p-3 ${isPreview ? "border-sky-300 bg-sky-50/60" : "border-slate-200 bg-white"
+                        }`}
                     >
                       <div className="mb-2 flex items-center justify-between">
                         <span className="text-sm font-semibold text-slate-800">v{revision.version}</span>
@@ -896,11 +1029,10 @@ function ToolbarMenu({
         <button
           type="button"
           disabled={disabled}
-          className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400 ${
-            isActive
-              ? "bg-sky-100 text-sky-700 hover:bg-sky-200/80"
-              : "text-slate-700 hover:bg-slate-100/80"
-          }`}
+          className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400 ${isActive
+            ? "bg-sky-100 text-sky-700 hover:bg-sky-200/80"
+            : "text-slate-700 hover:bg-slate-100/80"
+            }`}
         >
           {icon}
           <span className="hidden md:inline">{label}</span>
@@ -948,11 +1080,10 @@ function TableInsertGridMenu({
         <button
           type="button"
           disabled={disabled}
-          className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400 ${
-            isActive
-              ? "bg-sky-100 text-sky-700 hover:bg-sky-200/80"
-              : "text-slate-700 hover:bg-slate-100/80"
-          }`}
+          className={`flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400 ${isActive
+            ? "bg-sky-100 text-sky-700 hover:bg-sky-200/80"
+            : "text-slate-700 hover:bg-slate-100/80"
+            }`}
         >
           <Table2 className="h-4 w-4" />
           <span className="hidden md:inline">表格</span>
@@ -978,11 +1109,10 @@ function TableInsertGridMenu({
                 <button
                   key={`table-grid-${rows}-${columns}`}
                   type="button"
-                  className={`h-3.5 w-3.5 rounded-[3px] border transition-colors ${
-                    isSelected
-                      ? "border-sky-500 bg-sky-400/80"
-                      : "border-slate-300 bg-slate-100 hover:border-slate-400 hover:bg-slate-200"
-                  }`}
+                  className={`h-3.5 w-3.5 rounded-[3px] border transition-colors ${isSelected
+                    ? "border-sky-500 bg-sky-400/80"
+                    : "border-slate-300 bg-slate-100 hover:border-slate-400 hover:bg-slate-200"
+                    }`}
                   onMouseEnter={() => {
                     setHoverRows(rows);
                     setHoverColumns(columns);

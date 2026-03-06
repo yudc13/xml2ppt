@@ -3,6 +3,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { zhCN } from "@clerk/localizations";
 import { Montserrat, Open_Sans } from "next/font/google";
 import { QueryProvider } from "@/features/shared/providers/query-provider";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 const montserrat = Montserrat({
@@ -30,6 +31,7 @@ export default function RootLayout({
       <body className={`${montserrat.variable} ${openSans.variable} antialiased`} suppressHydrationWarning>
         <ClerkProvider localization={zhCN} signInFallbackRedirectUrl="/" signUpFallbackRedirectUrl="/">
           <QueryProvider>{children}</QueryProvider>
+          <Toaster position="bottom-right" richColors />
         </ClerkProvider>
       </body>
     </html>
