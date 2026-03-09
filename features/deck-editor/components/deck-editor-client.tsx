@@ -711,13 +711,8 @@ function Toolbar({
   isRollingBack: boolean;
   isPreviewingRevision: boolean;
 }) {
-  const selectedShapeId = useSlideEditorStore((state) => state.selectedShapeId);
   const pendingInsertion = useSlideEditorStore((state) => state.pendingInsertion);
   const setPendingInsertion = useSlideEditorStore((state) => state.setPendingInsertion);
-  const bringToFront = useSlideEditorStore((state) => state.bringToFront);
-  const sendToBack = useSlideEditorStore((state) => state.sendToBack);
-  const bringForward = useSlideEditorStore((state) => state.bringForward);
-  const sendBackward = useSlideEditorStore((state) => state.sendBackward);
   const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
   const copySelectedShape = useSlideEditorStore((state) => state.copySelectedShape);
   const cutSelectedShape = useSlideEditorStore((state) => state.cutSelectedShape);
@@ -795,27 +790,6 @@ function Toolbar({
         return
       }
 
-      // Layering shortcuts
-      if (isMeta && event.shiftKey && event.key.toLowerCase() === 'f') {
-        event.preventDefault()
-        bringToFront()
-        return
-      }
-      if (isMeta && event.shiftKey && event.key.toLowerCase() === 'b') {
-        event.preventDefault()
-        sendToBack()
-        return
-      }
-      if (isMeta && event.altKey && event.key.toLowerCase() === 'f') {
-        event.preventDefault()
-        bringForward()
-        return
-      }
-      if (isMeta && event.altKey && event.key.toLowerCase() === 'b') {
-        event.preventDefault()
-        sendBackward()
-        return
-      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
@@ -830,10 +804,6 @@ function Toolbar({
     redo,
     setPendingInsertion,
     undo,
-    bringToFront,
-    sendToBack,
-    bringForward,
-    sendBackward,
   ])
 
   return (
@@ -915,24 +885,6 @@ function Toolbar({
         <div className="mx-1.5 h-6 w-px bg-slate-200" />
 
         <ToolbarButton icon={<Palette className="h-4 w-4" />} label="格式" />
-        <button
-          type="button"
-          disabled={!selectedShapeId}
-          onClick={bringToFront}
-          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
-        >
-          <ArrowUpToLine className="h-4 w-4" />
-          <span className="hidden md:inline">置顶</span>
-        </button>
-        <button
-          type="button"
-          disabled={!selectedShapeId}
-          onClick={sendToBack}
-          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
-        >
-          <ArrowDownToLine className="h-4 w-4" />
-          <span className="hidden md:inline">置底</span>
-        </button>
 
         <div className="mx-1.5 h-6 w-px bg-slate-200" />
 
