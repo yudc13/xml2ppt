@@ -24,74 +24,31 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { buildShapeContentHtml } from "@/lib/slide-xml/rich-text";
 import type { SlideShapeModel, TableModel, XmlNode, XmlValue } from "@/lib/slide-xml/types";
 
-const RESIZE_HANDLE_SIZE = 12;
-const HANDLE_HIT_SIZE = 36;
-const ROTATION_SNAP_DEGREES = 15;
-const ROTATE_HANDLE_OFFSET = 32;
-const TOOLBAR_GAP = 12;
-const HANDLE_EDGE_THRESHOLD = 40;
+import { ToolbarManager } from "./toolbars/toolbar-manager";
+import {
+  ALIGN_OPTIONS,
+  BORDER_STYLE_OPTIONS,
+  COLOR_OPTIONS,
+  FONT_OPTIONS,
+  LIST_OPTIONS,
+  SHAPE_BORDER_OPTIONS,
+  SHAPE_FILL_OPTIONS,
+  THEME_COLOR_OPTIONS,
+} from "./toolbars/types";
+import type { TextStyleState } from "./toolbars/types";
+
 const SLIDE_BASE_WIDTH = 960;
 const SLIDE_BASE_HEIGHT = 540;
+const TOOLBAR_GAP = 12;
+const TOOLBAR_PORTAL_Z_INDEX = 50;
+const CONTROL_OVERLAY_Z_INDEX = 40;
+const ROTATE_HANDLE_OFFSET = 40;
+const HANDLE_EDGE_THRESHOLD = 40;
+const SNAP_THRESHOLD = 5;
+const ROTATION_SNAP_DEGREES = 15;
 const MIN_SHAPE_SIZE = 12;
-const SNAP_THRESHOLD = 6;
-const CONTROL_OVERLAY_Z_INDEX = 10_000;
-const TOOLBAR_PORTAL_Z_INDEX = 10_100;
-
-const FONT_OPTIONS = ["Montserrat", "Open Sans", "Noto Sans SC"] as const;
-const COLOR_OPTIONS = [
-  "rgba(17, 50, 100, 1)",
-  "rgba(13, 116, 206, 1)",
-  "rgba(239, 95, 0, 1)",
-  "rgba(31, 35, 41, 1)",
-  "rgba(100, 100, 100, 1)",
-] as const;
-const THEME_COLOR_OPTIONS = [
-  "rgba(13, 116, 206, 1)",
-  "rgba(16, 185, 129, 1)",
-  "rgba(245, 158, 11, 1)",
-  "rgba(239, 68, 68, 1)",
-  "rgba(99, 102, 241, 1)",
-  "rgba(31, 35, 41, 1)",
-] as const;
-const ALIGN_OPTIONS = [
-  { label: "左对齐", value: "left", icon: AlignLeft },
-  { label: "居中对齐", value: "center", icon: AlignCenter },
-  { label: "右对齐", value: "right", icon: AlignRight },
-] as const;
-const LIST_OPTIONS = [
-  { label: "无列表", value: "none", icon: List },
-  { label: "有序列表", value: "ordered", icon: ListOrdered },
-  { label: "无序列表", value: "unordered", icon: List },
-] as const;
-const SHAPE_FILL_OPTIONS = [
-  "rgba(255, 255, 255, 1)",
-  "rgba(234, 88, 12, 1)",
-  "rgba(37, 99, 235, 1)",
-  "rgba(13, 148, 136, 1)",
-  "rgba(148, 163, 184, 1)",
-  "rgba(31, 41, 55, 1)",
-] as const;
-const SHAPE_BORDER_OPTIONS = [
-  "rgba(17, 24, 39, 1)",
-  "rgba(71, 85, 105, 1)",
-  "rgba(234, 88, 12, 1)",
-  "rgba(37, 99, 235, 1)",
-  "rgba(34, 197, 94, 1)",
-  "rgba(168, 85, 247, 1)",
-] as const;
-const BORDER_STYLE_OPTIONS = [
-  { label: "实线", value: "solid" },
-  { label: "虚线", value: "dashed" },
-  { label: "点线", value: "dotted" },
-] as const;
-
-type TextStyleState = {
-  fontFamily: string;
-  fontSize: number;
-  color: string;
-  textAlign: "left" | "center" | "right";
-  listType: "none" | "ordered" | "unordered";
-};
+const RESIZE_HANDLE_SIZE = 8;
+const HANDLE_HIT_SIZE = 24;
 
 type RotationIndicator = {
   angle: number;
@@ -423,6 +380,10 @@ function extractFontFamily(value: string): string {
   if (!primary) {
     return FONT_OPTIONS[0];
   }
+
+  // Handle CSS variables from Next.js fonts
+  if (primary === "var(--font-montserrat)") return "Montserrat";
+  if (primary === "var(--font-open-sans)") return "Open Sans";
 
   if (FONT_OPTIONS.includes(primary as (typeof FONT_OPTIONS)[number])) {
     return primary;
@@ -889,7 +850,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const isEditing = isInteractive && editingShapeId === shapeId;
   const isDraggableTextShape = isInteractive && hasRichTextContent && isSelected && !isEditing;
   const [textStyle, setTextStyle] = useState<TextStyleState>({
-    fontFamily: FONT_OPTIONS[0],
+    fontFamily: "Montserrat",
     fontSize: 16,
     color: "rgba(31, 35, 41, 1)",
     textAlign: "left",
@@ -921,32 +882,32 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     () =>
       rotateHandleOnTop
         ? {
-            left: "50%",
-            top: -ROTATE_HANDLE_OFFSET,
-            transform: "translate(-50%, -50%)",
-          }
+          left: "50%",
+          top: -ROTATE_HANDLE_OFFSET,
+          transform: "translate(-50%, -50%)",
+        }
         : {
-            left: "50%",
-            top: `calc(100% + ${ROTATE_HANDLE_OFFSET}px)`,
-            transform: "translate(-50%, -50%)",
-          },
+          left: "50%",
+          top: `calc(100% + ${ROTATE_HANDLE_OFFSET}px)`,
+          transform: "translate(-50%, -50%)",
+        },
     [rotateHandleOnTop],
   );
   const rotateHandleLineStyle = useMemo<CSSProperties>(
     () =>
       rotateHandleOnTop
         ? {
-            left: "50%",
-            top: -ROTATE_HANDLE_OFFSET + 10,
-            height: ROTATE_HANDLE_OFFSET - 10,
-            transform: "translateX(-50%)",
-          }
+          left: "50%",
+          top: -ROTATE_HANDLE_OFFSET + 10,
+          height: ROTATE_HANDLE_OFFSET - 10,
+          transform: "translateX(-50%)",
+        }
         : {
-            left: "50%",
-            top: "100%",
-            height: ROTATE_HANDLE_OFFSET - 10,
-            transform: "translateX(-50%)",
-          },
+          left: "50%",
+          top: "100%",
+          height: ROTATE_HANDLE_OFFSET - 10,
+          transform: "translateX(-50%)",
+        },
     [rotateHandleOnTop],
   );
   const toolbarPortalStyle = useMemo(
@@ -1056,8 +1017,8 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     const resizeObserver =
       viewportElement && typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(() => {
-            syncViewportRect();
-          })
+          syncViewportRect();
+        })
         : null;
 
     if (viewportElement && resizeObserver) {
@@ -1239,7 +1200,13 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       };
 
       const styleTarget = document.createElement("span").style;
-      styleTarget.fontFamily = draft.fontFamily;
+      if (draft.fontFamily === "Montserrat") {
+        styleTarget.fontFamily = "var(--font-montserrat)";
+      } else if (draft.fontFamily === "Open Sans") {
+        styleTarget.fontFamily = "var(--font-open-sans)";
+      } else {
+        styleTarget.fontFamily = draft.fontFamily;
+      }
       styleTarget.fontSize = `calc(var(--slide-unit) * var(--slide-font-scale, 1) * ${draft.fontSize})`;
       styleTarget.color = draft.color;
       apply(styleTarget);
@@ -1523,1026 +1490,424 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         }}
         onPointerDown={isInteractive && !isEditing ? beginDrag : undefined}
       >
-      <div
-        className="h-full w-full overflow-hidden"
-        style={{
-          transform: `rotate(${currentRotation}deg)`,
-          transformOrigin: "center center",
-          background: isLineLikeShape ? undefined : backgroundColor,
-          borderRadius: isImageShape ? imageFrameRadius : isEllipseShape ? "9999px" : shape.style.borderRadius,
-          border:
-            !isLineLikeShape && borderColor && borderWidth > 0
-              ? `${borderWidth}px ${borderStyle} ${borderColor}`
-              : undefined,
-          outline: isSelected ? "2px solid rgba(14, 116, 244, 0.7)" : undefined,
-          outlineOffset: isSelected ? "-1px" : undefined,
-        }}
-      >
-        {isLineLikeShape ? (
-          <svg className="h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-            {isArrowShape ? (
-              <defs>
-                <marker
-                  id={arrowMarkerId}
-                  viewBox="0 0 10 10"
-                  refX="9"
-                  refY="5"
-                  markerWidth="7"
-                  markerHeight="7"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill={borderColor ?? "rgba(13, 116, 206, 1)"} />
-                </marker>
-              </defs>
-            ) : null}
-            <line
-              x1="2"
-              y1="50"
-              x2="98"
-              y2="50"
-              stroke={borderWidth <= 0 ? "transparent" : (borderColor ?? "rgba(13, 116, 206, 1)")}
-              strokeWidth={Math.max(0, borderWidth)}
-              strokeDasharray={
-                borderStyle === "dashed" ? "8 6" : borderStyle === "dotted" ? "2 5" : undefined
-              }
-              markerEnd={isArrowShape ? `url(#${arrowMarkerId})` : undefined}
-            />
-          </svg>
-        ) : isTableShape ? (
-          <div
-            className="h-full w-full rounded-[calc(var(--slide-unit)*6)] bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-[calc(var(--slide-unit)*4)]"
-            onPointerDown={(event) => {
-              if (!isInteractive) {
-                return;
-              }
-              if (isEditing) {
+        <div
+          className="h-full w-full overflow-hidden"
+          style={{
+            transform: `rotate(${currentRotation}deg)`,
+            transformOrigin: "center center",
+            background: isLineLikeShape ? undefined : backgroundColor,
+            borderRadius: isImageShape ? imageFrameRadius : isEllipseShape ? "9999px" : shape.style.borderRadius,
+            border:
+              !isLineLikeShape && borderColor && borderWidth > 0
+                ? `${borderWidth}px ${borderStyle} ${borderColor}`
+                : undefined,
+            outline: isSelected ? "2px solid rgba(14, 116, 244, 0.7)" : undefined,
+            outlineOffset: isSelected ? "-1px" : undefined,
+          }}
+        >
+          {isLineLikeShape ? (
+            <svg className="h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+              {isArrowShape ? (
+                <defs>
+                  <marker
+                    id={arrowMarkerId}
+                    viewBox="0 0 10 10"
+                    refX="9"
+                    refY="5"
+                    markerWidth="7"
+                    markerHeight="7"
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill={borderColor ?? "rgba(13, 116, 206, 1)"} />
+                  </marker>
+                </defs>
+              ) : null}
+              <line
+                x1="2"
+                y1="50"
+                x2="98"
+                y2="50"
+                stroke={borderWidth <= 0 ? "transparent" : (borderColor ?? "rgba(13, 116, 206, 1)")}
+                strokeWidth={Math.max(0, borderWidth)}
+                strokeDasharray={
+                  borderStyle === "dashed" ? "8 6" : borderStyle === "dotted" ? "2 5" : undefined
+                }
+                markerEnd={isArrowShape ? `url(#${arrowMarkerId})` : undefined}
+              />
+            </svg>
+          ) : isTableShape ? (
+            <div
+              className="h-full w-full rounded-[calc(var(--slide-unit)*6)] bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-[calc(var(--slide-unit)*4)]"
+              onPointerDown={(event) => {
+                if (!isInteractive) {
+                  return;
+                }
+                if (isEditing) {
+                  event.stopPropagation();
+                }
+                selectShape(shapeId);
+              }}
+              onDoubleClick={(event) => {
+                if (!isInteractive) {
+                  return;
+                }
                 event.stopPropagation();
-              }
-              selectShape(shapeId);
-            }}
-            onDoubleClick={(event) => {
-              if (!isInteractive) {
-                return;
-              }
-              event.stopPropagation();
-              setEditingShape(shapeId);
-            }}
-          >
-            <table
-              className="h-full w-full table-fixed overflow-hidden rounded-[calc(var(--slide-unit)*4)] border border-slate-300/90 border-separate border-spacing-0 bg-white shadow-[0_1px_0_rgba(15,23,42,0.04)]"
-              onPointerLeave={() => {
-                setHoverTableCell(null);
+                setEditingShape(shapeId);
               }}
             >
-              <tbody>
-                {tableModel.rows.map((row, rowIndex) => (
-                  <tr key={row.id}>
-                    {row.cells.map((cell, cellIndex) => (
-                      (() => {
-                        const isActiveRow = isSelected && hasActiveTableCell && rowIndex === activeRowIndex;
-                        const isActiveCol = isSelected && hasActiveTableCell && cellIndex === activeColIndex;
-                        const isActiveCell = isActiveRow && isActiveCol;
-                        const isHoverRow = hoverTableCell !== null && rowIndex === hoverRowIndex;
-                        const isHoverCol = hoverTableCell !== null && cellIndex === hoverColIndex;
-                        const isHoverCell = isHoverRow && isHoverCol;
-                        const baseCellClass =
-                          rowIndex === 0
-                            ? "bg-[linear-gradient(180deg,#f8fbff_0%,#f1f5f9_100%)] font-semibold text-slate-800"
-                            : rowIndex % 2 === 0
-                              ? "bg-slate-50/30"
-                              : "bg-white";
-                        const hoverClass =
-                          !isActiveCell && (isHoverRow || isHoverCol)
-                            ? isHoverCell
-                              ? "bg-indigo-100/80"
-                              : isHoverRow
-                                ? "bg-indigo-50/60"
-                                : "bg-violet-50/60"
-                            : "";
-                        const activeClass = isActiveCell
-                          ? "bg-cyan-100/95 shadow-[inset_0_0_0_1px_rgba(14,116,244,0.7)]"
-                          : isActiveRow
-                            ? "bg-sky-100/80"
-                            : isActiveCol
-                              ? "bg-amber-100/75"
+              <table
+                className="h-full w-full table-fixed overflow-hidden rounded-[calc(var(--slide-unit)*4)] border border-slate-300/90 border-separate border-spacing-0 bg-white shadow-[0_1px_0_rgba(15,23,42,0.04)]"
+                onPointerLeave={() => {
+                  setHoverTableCell(null);
+                }}
+              >
+                <tbody>
+                  {tableModel.rows.map((row, rowIndex) => (
+                    <tr key={row.id}>
+                      {row.cells.map((cell, cellIndex) => (
+                        (() => {
+                          const isActiveRow = isSelected && hasActiveTableCell && rowIndex === activeRowIndex;
+                          const isActiveCol = isSelected && hasActiveTableCell && cellIndex === activeColIndex;
+                          const isActiveCell = isActiveRow && isActiveCol;
+                          const isHoverRow = hoverTableCell !== null && rowIndex === hoverRowIndex;
+                          const isHoverCol = hoverTableCell !== null && cellIndex === hoverColIndex;
+                          const isHoverCell = isHoverRow && isHoverCol;
+                          const baseCellClass =
+                            rowIndex === 0
+                              ? "bg-[linear-gradient(180deg,#f8fbff_0%,#f1f5f9_100%)] font-semibold text-slate-800"
+                              : rowIndex % 2 === 0
+                                ? "bg-slate-50/30"
+                                : "bg-white";
+                          const hoverClass =
+                            !isActiveCell && (isHoverRow || isHoverCol)
+                              ? isHoverCell
+                                ? "bg-indigo-100/80"
+                                : isHoverRow
+                                  ? "bg-indigo-50/60"
+                                  : "bg-violet-50/60"
                               : "";
+                          const activeClass = isActiveCell
+                            ? "bg-cyan-100/95 shadow-[inset_0_0_0_1px_rgba(14,116,244,0.7)]"
+                            : isActiveRow
+                              ? "bg-sky-100/80"
+                              : isActiveCol
+                                ? "bg-amber-100/75"
+                                : "";
 
-                        return (
-                      <td
-                        key={cell.id}
-                        className={`relative overflow-hidden border-b border-r border-slate-300/80 align-middle text-center text-[calc(var(--slide-unit)*14)] text-slate-700 transition-colors duration-150 ${baseCellClass} ${hoverClass} ${activeClass}`}
-                        style={{
-                          borderRightWidth: cellIndex === row.cells.length - 1 ? 0 : undefined,
-                          borderBottomWidth: rowIndex === tableModel.rows.length - 1 ? 0 : undefined,
-                        }}
-                        onPointerEnter={() => {
-                          setHoverTableCell({ rowIndex, colIndex: cellIndex });
-                        }}
-                        onPointerDown={() => {
-                          setActiveTableCell({ rowIndex, colIndex: cellIndex });
-                        }}
-                      >
-                        {isSelected && hasActiveTableCell && rowIndex === activeRowIndex && cellIndex === 0 ? (
-                          <div className="pointer-events-none absolute top-0 left-0 h-full w-[calc(var(--slide-unit)*2.5)] bg-sky-600/85" />
-                        ) : null}
-                        {isSelected && hasActiveTableCell && rowIndex === 0 && cellIndex === activeColIndex ? (
-                          <div className="pointer-events-none absolute top-0 left-0 h-[calc(var(--slide-unit)*2.5)] w-full bg-amber-500/85" />
-                        ) : null}
-                        {hoverTableCell !== null && rowIndex === hoverRowIndex && cellIndex === 0 ? (
-                          <div className="pointer-events-none absolute top-0 left-0 h-full w-[calc(var(--slide-unit)*1.5)] bg-indigo-400/55" />
-                        ) : null}
-                        {hoverTableCell !== null && rowIndex === 0 && cellIndex === hoverColIndex ? (
-                          <div className="pointer-events-none absolute top-0 left-0 h-[calc(var(--slide-unit)*1.5)] w-full bg-violet-400/60" />
-                        ) : null}
-                        {isInteractive && isEditing ? (
-                          <div
-                            ref={(element) => {
-                              tableCellRefs.current[cell.id] = element;
-                              if (!element) {
-                                return;
-                              }
+                          return (
+                            <td
+                              key={cell.id}
+                              className={`relative overflow-hidden border-b border-r border-slate-300/80 align-middle text-center text-[calc(var(--slide-unit)*14)] text-slate-700 transition-colors duration-150 ${baseCellClass} ${hoverClass} ${activeClass}`}
+                              style={{
+                                borderRightWidth: cellIndex === row.cells.length - 1 ? 0 : undefined,
+                                borderBottomWidth: rowIndex === tableModel.rows.length - 1 ? 0 : undefined,
+                              }}
+                              onPointerEnter={() => {
+                                setHoverTableCell({ rowIndex, colIndex: cellIndex });
+                              }}
+                              onPointerDown={() => {
+                                setActiveTableCell({ rowIndex, colIndex: cellIndex });
+                              }}
+                            >
+                              {isSelected && hasActiveTableCell && rowIndex === activeRowIndex && cellIndex === 0 ? (
+                                <div className="pointer-events-none absolute top-0 left-0 h-full w-[calc(var(--slide-unit)*2.5)] bg-sky-600/85" />
+                              ) : null}
+                              {isSelected && hasActiveTableCell && rowIndex === 0 && cellIndex === activeColIndex ? (
+                                <div className="pointer-events-none absolute top-0 left-0 h-[calc(var(--slide-unit)*2.5)] w-full bg-amber-500/85" />
+                              ) : null}
+                              {hoverTableCell !== null && rowIndex === hoverRowIndex && cellIndex === 0 ? (
+                                <div className="pointer-events-none absolute top-0 left-0 h-full w-[calc(var(--slide-unit)*1.5)] bg-indigo-400/55" />
+                              ) : null}
+                              {hoverTableCell !== null && rowIndex === 0 && cellIndex === hoverColIndex ? (
+                                <div className="pointer-events-none absolute top-0 left-0 h-[calc(var(--slide-unit)*1.5)] w-full bg-violet-400/60" />
+                              ) : null}
+                              {isInteractive && isEditing ? (
+                                <div
+                                  ref={(element) => {
+                                    tableCellRefs.current[cell.id] = element;
+                                    if (!element) {
+                                      return;
+                                    }
 
-                              const isFocused = document.activeElement === element;
-                              if (!isFocused && element.textContent !== cell.text) {
-                                element.textContent = cell.text;
-                              }
-                            }}
-                            className="flex h-full min-h-[calc(var(--slide-unit)*28)] w-full items-center justify-center rounded-[calc(var(--slide-unit)*2)] bg-transparent px-2 py-1 text-center text-[calc(var(--slide-unit)*14)] text-slate-700 outline-none ring-inset transition-shadow focus:bg-white focus:shadow-[inset_0_0_0_1px_rgba(14,116,244,0.5)]"
-                            contentEditable
-                            suppressContentEditableWarning
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onFocus={() => {
-                              setActiveTableCell({ rowIndex, colIndex: cellIndex });
-                            }}
-                            onCompositionStart={() => {
-                              composingTableCellIdRef.current = cell.id;
-                            }}
-                            onCompositionEnd={(event) => {
-                              composingTableCellIdRef.current = null;
-                              updateTableCell(shapeId, rowIndex, cellIndex, event.currentTarget.textContent ?? "");
-                            }}
-                            onInput={(event) => {
-                              if (composingTableCellIdRef.current === cell.id) {
-                                return;
-                              }
-                              updateTableCell(shapeId, rowIndex, cellIndex, event.currentTarget.textContent ?? "");
-                            }}
-                            onBlur={(event) => {
-                              updateTableCell(shapeId, rowIndex, cellIndex, event.currentTarget.textContent ?? "");
-                            }}
-                          />
-                        ) : (
-                          <div className="flex min-h-[calc(var(--slide-unit)*28)] items-center justify-center px-2 py-1 leading-tight">
-                            {cell.text || "\u00A0"}
-                          </div>
-                        )}
-                      </td>
-                        );
-                      })()
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : isImageShape ? (
-          imageSource ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={imageSource}
-              alt=""
-              draggable={false}
-              className="pointer-events-none absolute max-w-none select-none"
-              style={{
-                left: `calc(var(--slide-unit) * ${-imageOffsetX})`,
-                top: `calc(var(--slide-unit) * ${-imageOffsetY})`,
-                width: `calc(100% + (var(--slide-unit) * ${imageScaleWidth}))`,
-                height: `calc(100% + (var(--slide-unit) * ${imageScaleHeight}))`,
-                objectFit: "cover",
-                borderRadius: imageFrameRadius,
+                                    const isFocused = document.activeElement === element;
+                                    if (!isFocused && element.textContent !== cell.text) {
+                                      element.textContent = cell.text;
+                                    }
+                                  }}
+                                  className="flex h-full min-h-[calc(var(--slide-unit)*28)] w-full items-center justify-center rounded-[calc(var(--slide-unit)*2)] bg-transparent px-2 py-1 text-center text-[calc(var(--slide-unit)*14)] text-slate-700 outline-none ring-inset transition-shadow focus:bg-white focus:shadow-[inset_0_0_0_1px_rgba(14,116,244,0.5)]"
+                                  contentEditable
+                                  suppressContentEditableWarning
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onFocus={() => {
+                                    setActiveTableCell({ rowIndex, colIndex: cellIndex });
+                                  }}
+                                  onCompositionStart={() => {
+                                    composingTableCellIdRef.current = cell.id;
+                                  }}
+                                  onCompositionEnd={(event) => {
+                                    composingTableCellIdRef.current = null;
+                                    updateTableCell(shapeId, rowIndex, cellIndex, event.currentTarget.textContent ?? "");
+                                  }}
+                                  onInput={(event) => {
+                                    if (composingTableCellIdRef.current === cell.id) {
+                                      return;
+                                    }
+                                    updateTableCell(shapeId, rowIndex, cellIndex, event.currentTarget.textContent ?? "");
+                                  }}
+                                  onBlur={(event) => {
+                                    updateTableCell(shapeId, rowIndex, cellIndex, event.currentTarget.textContent ?? "");
+                                  }}
+                                />
+                              ) : (
+                                <div className="flex min-h-[calc(var(--slide-unit)*28)] items-center justify-center px-2 py-1 leading-tight">
+                                  {cell.text || "\u00A0"}
+                                </div>
+                              )}
+                            </td>
+                          );
+                        })()
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : isImageShape ? (
+            imageSource ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={imageSource}
+                alt=""
+                draggable={false}
+                className="pointer-events-none absolute max-w-none select-none"
+                style={{
+                  left: `calc(var(--slide-unit) * ${-imageOffsetX})`,
+                  top: `calc(var(--slide-unit) * ${-imageOffsetY})`,
+                  width: `calc(100% + (var(--slide-unit) * ${imageScaleWidth}))`,
+                  height: `calc(100% + (var(--slide-unit) * ${imageScaleHeight}))`,
+                  objectFit: "cover",
+                  borderRadius: imageFrameRadius,
+                }}
+              />
+            ) : (
+              <div className="grid h-full w-full place-items-center bg-slate-100 text-[calc(var(--slide-unit)*12)] text-slate-500">
+                图片缺失
+              </div>
+            )
+          ) : hasRichTextContent ? (
+            <div
+              ref={editableRef}
+              className="h-full w-full [&_ol]:ml-6 [&_ol]:list-decimal [&_ol]:pl-2 [&_ul]:ml-6 [&_ul]:list-disc [&_ul]:pl-2 [&_li]:leading-[1.5]"
+              contentEditable={isInteractive && isEditing}
+              style={{ cursor: isDraggableTextShape ? "move" : undefined }}
+              suppressContentEditableWarning
+              onPointerDown={(event) => {
+                if (!isInteractive) {
+                  return;
+                }
+                if (isEditing) {
+                  event.stopPropagation();
+                  selectShape(shapeId);
+                  return;
+                }
+
+                beginDrag(event);
+              }}
+              onClick={(event) => {
+                if (!isInteractive) {
+                  return;
+                }
+                event.stopPropagation();
+              }}
+              onDoubleClick={(event) => {
+                if (!isInteractive) {
+                  return;
+                }
+                event.stopPropagation();
+                setEditingShape(shapeId);
+              }}
+              onInput={() => {
+                if (!isInteractive) {
+                  return;
+                }
+                syncShapeContentFromDom();
+                resizeTextShapeToContent("content");
+              }}
+              onBeforeInput={(event) => {
+                if (!isInteractive || !isEditing) {
+                  return;
+                }
+
+                const nativeEvent = event.nativeEvent as InputEvent;
+                const draftStyle = draftTextStyleRef.current;
+                if (!draftStyle) {
+                  return;
+                }
+
+                if (nativeEvent.inputType !== "insertText" || !nativeEvent.data) {
+                  return;
+                }
+
+                const element = editableRef.current;
+                if (!element) {
+                  return;
+                }
+
+                if (!isCollapsedSelectionInside(element)) {
+                  restoreCollapsedSelection(element, savedCollapsedRangeRef.current);
+                }
+
+                if (!insertStyledTextAtCaret(element, nativeEvent.data, draftStyle)) {
+                  return;
+                }
+
+                event.preventDefault();
+                syncShapeContentFromDom();
+                resizeTextShapeToContent("content");
+              }}
+              onBlur={() => {
+                if (!isInteractive) {
+                  return;
+                }
+                syncShapeContentFromDom();
+                draftTextStyleRef.current = null;
+                savedCollapsedRangeRef.current = null;
+                setSelectionToolbarRect(null);
+                setEditingShape(null);
               }}
             />
-          ) : (
-            <div className="grid h-full w-full place-items-center bg-slate-100 text-[calc(var(--slide-unit)*12)] text-slate-500">
-              图片缺失
-            </div>
-          )
-        ) : hasRichTextContent ? (
-          <div
-            ref={editableRef}
-            className="h-full w-full [&_ol]:ml-6 [&_ol]:list-decimal [&_ol]:pl-2 [&_ul]:ml-6 [&_ul]:list-disc [&_ul]:pl-2 [&_li]:leading-[1.5]"
-            contentEditable={isInteractive && isEditing}
-            style={{ cursor: isDraggableTextShape ? "move" : undefined }}
-            suppressContentEditableWarning
-            onPointerDown={(event) => {
-              if (!isInteractive) {
-                return;
-              }
-              if (isEditing) {
-                event.stopPropagation();
-                selectShape(shapeId);
-                return;
-              }
+          ) : null}
+        </div>
 
-              beginDrag(event);
-            }}
-            onClick={(event) => {
-              if (!isInteractive) {
-                return;
-              }
-              event.stopPropagation();
-            }}
-            onDoubleClick={(event) => {
-              if (!isInteractive) {
-                return;
-              }
-              event.stopPropagation();
-              setEditingShape(shapeId);
-            }}
-            onInput={() => {
-              if (!isInteractive) {
-                return;
-              }
-              syncShapeContentFromDom();
-              resizeTextShapeToContent("content");
-            }}
-            onBeforeInput={(event) => {
-              if (!isInteractive || !isEditing) {
-                return;
-              }
-
-              const nativeEvent = event.nativeEvent as InputEvent;
-              const draftStyle = draftTextStyleRef.current;
-              if (!draftStyle) {
-                return;
-              }
-
-              if (nativeEvent.inputType !== "insertText" || !nativeEvent.data) {
-                return;
-              }
-
-              const element = editableRef.current;
-              if (!element) {
-                return;
-              }
-
-              if (!isCollapsedSelectionInside(element)) {
-                restoreCollapsedSelection(element, savedCollapsedRangeRef.current);
-              }
-
-              if (!insertStyledTextAtCaret(element, nativeEvent.data, draftStyle)) {
-                return;
-              }
-
-              event.preventDefault();
-              syncShapeContentFromDom();
-              resizeTextShapeToContent("content");
-            }}
-            onBlur={() => {
-              if (!isInteractive) {
-                return;
-              }
-              syncShapeContentFromDom();
-              draftTextStyleRef.current = null;
-              savedCollapsedRangeRef.current = null;
-              setSelectionToolbarRect(null);
-              setEditingShape(null);
-            }}
-          />
-        ) : null}
-      </div>
-
-      {isSelected && hasRichTextContent && (!isEditing || selectionToolbarRect) ? (
-        <TextFormatToolbar
-          isMobile={isMobile}
-          portalStyle={textToolbarPortalStyle}
-          textStyle={textStyle}
-          onApplyAlign={applyTextAlignment}
-          onApplyListType={applyListType}
-          onApplyFont={(fontFamily) => {
-            applyTextStyle((style) => {
-              style.fontFamily = fontFamily;
-            });
+        <ToolbarManager
+          shape={shape}
+          context={{
+            isMobile,
+            isSelected,
+            isEditing,
+            hasRichTextContent,
+            isTableShape,
+            isShapeStyleTarget,
+            isLineLikeShape,
+            portalStyle: toolbarPortalStyle,
+            textToolbarPortalStyle,
           }}
-          onApplyFontSize={(fontSize) => {
-            applyTextStyle((style) => {
-              style.fontSize = `calc(var(--slide-unit) * var(--slide-font-scale, 1) * ${fontSize})`;
-            });
+          state={{
+            textStyle,
+            activeRowIndex,
+            activeColIndex,
+            rowCount: tableRowCount,
+            colCount: tableColCount,
+            backgroundColor: backgroundColor ?? "rgba(255, 255, 255, 1)",
+            borderColor: borderColor ?? "rgba(31, 35, 41, 1)",
+            borderWidth,
+            borderStyle,
           }}
-          onApplyColor={(color) => {
-            applyTextStyle((style) => {
-              style.color = color;
-            });
+          actions={{
+            onApplyTextStyle: applyTextStyle,
+            onApplyTextAlignment: applyTextAlignment,
+            onApplyListType: applyListType,
+            onInsertTableRowAt: (index, pos) => insertTableRowAt(shapeId, index, pos),
+            onRemoveTableRowAt: (index) => removeTableRowAt(shapeId, index),
+            onInsertTableColumnAt: (index, pos) => insertTableColumnAt(shapeId, index, pos),
+            onRemoveTableColumnAt: (index) => removeTableColumnAt(shapeId, index),
+            onUpdateShapeFillColor: (color) => {
+              captureHistorySnapshot();
+              updateShapeFillColor(shapeId, color);
+            },
+            onUpdateShapeBorderStyle: (style) => {
+              captureHistorySnapshot();
+              updateShapeBorderStyle(shapeId, style);
+            },
+            onUpdateShapeBorderColor: (color) => {
+              captureHistorySnapshot();
+              updateShapeBorderColor(shapeId, color);
+            },
+            onUpdateShapeBorderWidth: (width) => {
+              captureHistorySnapshot();
+              updateShapeBorderWidth(shapeId, width);
+            },
           }}
         />
-      ) : null}
-
-      {isSelected && isTableShape ? (
-        <TableToolbar
-          isMobile={isMobile}
-          portalStyle={toolbarPortalStyle}
-          activeRowIndex={activeRowIndex}
-          activeColIndex={activeColIndex}
-          rowCount={tableRowCount}
-          colCount={tableColCount}
-          onInsertRowAbove={() => insertTableRowAt(shapeId, activeRowIndex, "before")}
-          onInsertRowBelow={() => insertTableRowAt(shapeId, activeRowIndex, "after")}
-          onDeleteCurrentRow={() => removeTableRowAt(shapeId, activeRowIndex)}
-          onInsertColLeft={() => insertTableColumnAt(shapeId, activeColIndex, "before")}
-          onInsertColRight={() => insertTableColumnAt(shapeId, activeColIndex, "after")}
-          onDeleteCurrentCol={() => removeTableColumnAt(shapeId, activeColIndex)}
-        />
-      ) : null}
-
-      {isSelected && isShapeStyleTarget ? (
-        <ShapeStyleToolbar
-          isMobile={isMobile}
-          portalStyle={toolbarPortalStyle}
-          isLineLikeShape={isLineLikeShape}
-          fillColor={backgroundColor ?? "rgba(255, 255, 255, 1)"}
-          borderColor={borderColor ?? "rgba(31, 35, 41, 1)"}
-          borderWidth={borderWidth}
-          borderStyle={borderStyle}
-          onFillColorChange={(color) => {
-            captureHistorySnapshot();
-            updateShapeFillColor(shapeId, color);
-          }}
-          onBorderStyleChange={(style) => {
-            captureHistorySnapshot();
-            updateShapeBorderStyle(shapeId, style);
-          }}
-          onBorderColorChange={(color) => {
-            captureHistorySnapshot();
-            updateShapeBorderColor(shapeId, color);
-          }}
-          onBorderWidthChange={(width) => {
-            captureHistorySnapshot();
-            updateShapeBorderWidth(shapeId, width);
-          }}
-        />
-      ) : null}
 
       </div>
       {isSelected && !isEditing && controlOverlayStyle && typeof document !== "undefined"
         ? createPortal(
-            <div data-shape-controls="true" className="pointer-events-none absolute overflow-visible" style={controlOverlayStyle}>
+          <div data-shape-controls="true" className="pointer-events-none absolute overflow-visible" style={controlOverlayStyle}>
+            <div
+              className="pointer-events-none absolute inset-0 overflow-visible"
+              style={{
+                transform: `rotate(${currentRotation}deg)`,
+                transformOrigin: "center center",
+              }}
+            >
               <div
-                className="pointer-events-none absolute inset-0 overflow-visible"
+                className="pointer-events-none absolute w-px bg-gradient-to-b from-sky-400/80 to-sky-600/80"
+                style={rotateHandleLineStyle}
+              />
+              <button
+                type="button"
+                aria-label="旋转形状"
+                className="group pointer-events-auto absolute rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:ring-offset-1 focus-visible:ring-offset-white active:scale-95"
                 style={{
-                  transform: `rotate(${currentRotation}deg)`,
-                  transformOrigin: "center center",
+                  ...rotateHandleStyle,
+                  width: HANDLE_HIT_SIZE,
+                  height: HANDLE_HIT_SIZE,
+                  cursor: "grab",
                 }}
+                onPointerDown={beginRotate}
               >
                 <div
-                  className="pointer-events-none absolute w-px bg-gradient-to-b from-sky-400/80 to-sky-600/80"
-                  style={rotateHandleLineStyle}
+                  className="absolute rounded-full border-2 border-white bg-sky-500 shadow-[0_8px_18px_rgba(14,116,244,0.35),0_0_0_1px_rgba(14,116,244,0.7)] transition-transform duration-150 group-hover:scale-105"
+                  style={{
+                    left: "50%",
+                    top: "50%",
+                    width: RESIZE_HANDLE_SIZE,
+                    height: RESIZE_HANDLE_SIZE,
+                    transform: "translate(-50%, -50%)",
+                  }}
                 />
-                <button
-                  type="button"
-                  aria-label="旋转形状"
-                  className="group pointer-events-auto absolute rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:ring-offset-1 focus-visible:ring-offset-white active:scale-95"
+              </button>
+              {rotationIndicator ? (
+                <div
+                  className="pointer-events-none absolute z-40 -translate-x-1/2 rounded-md border border-slate-700/70 bg-slate-950/90 px-2 py-1 text-[10px] font-semibold text-white shadow-[0_4px_14px_rgba(2,6,23,0.35)]"
                   style={{
-                    ...rotateHandleStyle,
-                    width: HANDLE_HIT_SIZE,
-                    height: HANDLE_HIT_SIZE,
-                    cursor: "grab",
+                    left: rotationIndicator.left,
+                    top: rotationIndicator.top,
                   }}
-                  onPointerDown={beginRotate}
                 >
-                  <div
-                    className="absolute rounded-full border-2 border-white bg-sky-500 shadow-[0_8px_18px_rgba(14,116,244,0.35),0_0_0_1px_rgba(14,116,244,0.7)] transition-transform duration-150 group-hover:scale-105"
-                    style={{
-                      left: "50%",
-                      top: "50%",
-                      width: RESIZE_HANDLE_SIZE,
-                      height: RESIZE_HANDLE_SIZE,
-                      transform: "translate(-50%, -50%)",
-                    }}
-                  />
-                </button>
-                {rotationIndicator ? (
-                  <div
-                    className="pointer-events-none absolute z-40 -translate-x-1/2 rounded-md border border-slate-700/70 bg-slate-950/90 px-2 py-1 text-[10px] font-semibold text-white shadow-[0_4px_14px_rgba(2,6,23,0.35)]"
-                    style={{
-                      left: rotationIndicator.left,
-                      top: rotationIndicator.top,
-                    }}
-                  >
-                    {Math.round(rotationIndicator.angle)}°
-                  </div>
-                ) : null}
-                <button
-                  type="button"
-                  aria-label="缩放形状"
-                  className="pointer-events-auto absolute rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:ring-offset-1 focus-visible:ring-offset-white active:scale-95"
+                  {Math.round(rotationIndicator.angle)}°
+                </div>
+              ) : null}
+              <button
+                type="button"
+                aria-label="缩放形状"
+                className="pointer-events-auto absolute rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:ring-offset-1 focus-visible:ring-offset-white active:scale-95"
+                style={{
+                  right: -(HANDLE_HIT_SIZE / 2),
+                  bottom: -(HANDLE_HIT_SIZE / 2),
+                  width: HANDLE_HIT_SIZE,
+                  height: HANDLE_HIT_SIZE,
+                  cursor: "nwse-resize",
+                }}
+                onPointerDown={beginResize}
+              >
+                <div
+                  className="absolute rounded-[4px] border-2 border-white bg-sky-500 shadow-[0_8px_18px_rgba(14,116,244,0.35),0_0_0_1px_rgba(14,116,244,0.7)]"
                   style={{
-                    right: -(HANDLE_HIT_SIZE / 2),
-                    bottom: -(HANDLE_HIT_SIZE / 2),
-                    width: HANDLE_HIT_SIZE,
-                    height: HANDLE_HIT_SIZE,
-                    cursor: "nwse-resize",
+                    right: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
+                    bottom: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
+                    width: RESIZE_HANDLE_SIZE,
+                    height: RESIZE_HANDLE_SIZE,
                   }}
-                  onPointerDown={beginResize}
-                >
-                  <div
-                    className="absolute rounded-[4px] border-2 border-white bg-sky-500 shadow-[0_8px_18px_rgba(14,116,244,0.35),0_0_0_1px_rgba(14,116,244,0.7)]"
-                    style={{
-                      right: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
-                      bottom: (HANDLE_HIT_SIZE - RESIZE_HANDLE_SIZE) / 2,
-                      width: RESIZE_HANDLE_SIZE,
-                      height: RESIZE_HANDLE_SIZE,
-                    }}
-                  />
-                </button>
-              </div>
-            </div>,
-            document.body,
-          )
+                />
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )
         : null}
     </>
   );
 }
 
-type TextFormatToolbarProps = {
-  isMobile: boolean;
-  portalStyle: CSSProperties | null;
-  textStyle: TextStyleState;
-  onApplyAlign: (align: TextStyleState["textAlign"]) => void;
-  onApplyListType: (listType: TextStyleState["listType"]) => void;
-  onApplyFont: (fontFamily: string) => void;
-  onApplyFontSize: (fontSize: number) => void;
-  onApplyColor: (color: string) => void;
-};
-
-function TextFormatToolbar({
-  isMobile,
-  portalStyle,
-  textStyle,
-  onApplyAlign,
-  onApplyListType,
-  onApplyFont,
-  onApplyFontSize,
-  onApplyColor,
-}: TextFormatToolbarProps) {
-  const [activePanel, setActivePanel] = useState<"align" | "list" | "font" | "color" | null>(null);
-  const [recentColors, setRecentColors] = useState<string[]>([]);
-  const toolbarRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const onPointerDownOutside = (event: PointerEvent) => {
-      if (!toolbarRef.current) {
-        return;
-      }
-      if (!toolbarRef.current.contains(event.target as Node)) {
-        setActivePanel(null);
-      }
-    };
-
-    document.addEventListener("pointerdown", onPointerDownOutside);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDownOutside);
-    };
-  }, []);
-
-  const alignLabel = useMemo(() => {
-    const option = ALIGN_OPTIONS.find((item) => item.value === textStyle.textAlign);
-    return option?.label ?? "左对齐";
-  }, [textStyle.textAlign]);
-
-  const listLabel = useMemo(() => {
-    const option = LIST_OPTIONS.find((item) => item.value === textStyle.listType);
-    return option?.label ?? "无列表";
-  }, [textStyle.listType]);
-
-  const handleColorApply = useCallback(
-    (color: string) => {
-      onApplyColor(color);
-      setRecentColors((current) => [color, ...current.filter((item) => item !== color)].slice(0, 8));
-      setActivePanel(null);
-    },
-    [onApplyColor],
-  );
-
-  if (!portalStyle || typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div
-      data-shape-toolbar="true"
-      style={portalStyle}
-      onPointerDown={(event) => event.stopPropagation()}
-      onMouseDown={(event) => event.preventDefault()}
-    >
-      <div ref={toolbarRef} className="relative">
-        <div
-          className={`flex items-center rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "gap-1 px-1.5 py-1" : "min-w-max gap-2 px-2 py-1.5"}`}
-        >
-          <div className="relative">
-            <button
-              type="button"
-              className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-100"
-              onClick={() => setActivePanel((current) => (current === "align" ? null : "align"))}
-            >
-              {alignLabel}
-              <ChevronDown className={`h-4 w-4 transition-transform ${activePanel === "align" ? "rotate-180" : ""}`} />
-            </button>
-            {activePanel === "align" ? (
-              <div className="absolute left-0 top-[calc(100%+10px)] z-30 w-44 rounded-xl border border-slate-300 bg-white p-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
-                {ALIGN_OPTIONS.map((option) => {
-                  const Icon = option.icon;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-                        textStyle.textAlign === option.value
-                          ? "bg-sky-50 text-sky-700"
-                          : "text-slate-700 hover:bg-slate-100"
-                      }`}
-                      onClick={() => {
-                        onApplyAlign(option.value);
-                        setActivePanel(null);
-                      }}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      {option.label}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="relative">
-            <button
-              type="button"
-              className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-100"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => setActivePanel((current) => (current === "list" ? null : "list"))}
-            >
-              {listLabel}
-              <ChevronDown className={`h-4 w-4 transition-transform ${activePanel === "list" ? "rotate-180" : ""}`} />
-            </button>
-            {activePanel === "list" ? (
-              <div className="absolute left-0 top-[calc(100%+10px)] z-30 w-44 rounded-xl border border-slate-300 bg-white p-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
-                {LIST_OPTIONS.map((option) => {
-                  const Icon = option.icon;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-                        textStyle.listType === option.value
-                          ? "bg-sky-50 text-sky-700"
-                          : "text-slate-700 hover:bg-slate-100"
-                      }`}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                        onApplyListType(option.value);
-                        setActivePanel(null);
-                      }}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      {option.label}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="relative">
-            <button
-              type="button"
-              className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-100"
-              onClick={() => setActivePanel((current) => (current === "font" ? null : "font"))}
-            >
-              <span className="max-w-[120px] truncate">{textStyle.fontFamily}</span>
-              <ChevronDown className={`h-4 w-4 transition-transform ${activePanel === "font" ? "rotate-180" : ""}`} />
-            </button>
-            {activePanel === "font" ? (
-              <div className="absolute left-0 top-[calc(100%+10px)] z-30 w-48 rounded-xl border border-slate-300 bg-white p-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
-                {FONT_OPTIONS.map((font) => (
-                  <button
-                    key={font}
-                    type="button"
-                    className={`flex w-full items-center rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
-                      textStyle.fontFamily === font
-                        ? "bg-sky-50 text-sky-700"
-                        : "text-slate-700 hover:bg-slate-100"
-                    }`}
-                    style={{ fontFamily: font }}
-                    onClick={() => {
-                      onApplyFont(font);
-                      setActivePanel(null);
-                    }}
-                  >
-                    {font}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="flex h-8 items-center rounded-xl border border-slate-300 bg-white p-0.5">
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => onApplyFontSize(Math.max(8, textStyle.fontSize - 1))}
-              className="grid h-7 w-7 place-items-center rounded-lg text-slate-700 transition-colors hover:bg-slate-100"
-            >
-              -
-            </button>
-            <span className="w-9 text-center text-sm font-medium text-slate-800">{textStyle.fontSize}</span>
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => onApplyFontSize(Math.min(96, textStyle.fontSize + 1))}
-              className="grid h-7 w-7 place-items-center rounded-lg text-slate-700 transition-colors hover:bg-slate-100"
-            >
-              +
-            </button>
-          </div>
-
-          <div className="relative">
-            <button
-              type="button"
-              className="flex h-8 items-center gap-2 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-700 transition-colors hover:bg-slate-100"
-              onClick={() => setActivePanel((current) => (current === "color" ? null : "color"))}
-            >
-              <span className="h-4 w-4 rounded-full border border-slate-200" style={{ backgroundColor: textStyle.color }} />
-              <span>颜色</span>
-              <ChevronDown className={`h-4 w-4 transition-transform ${activePanel === "color" ? "rotate-180" : ""}`} />
-            </button>
-            {activePanel === "color" ? (
-              <div className="absolute right-0 top-[calc(100%+10px)] z-30 w-[260px] rounded-xl border border-slate-300 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
-                <p className="mb-2 text-xs font-medium text-slate-500">主题色</p>
-                <div className="mb-3 grid grid-cols-6 gap-2">
-                  {THEME_COLOR_OPTIONS.map((color) => (
-                    <button
-                      key={`theme-${color}`}
-                      type="button"
-                      className="h-7 w-7 rounded-full border border-slate-200"
-                      style={{
-                        backgroundColor: color,
-                        boxShadow: textStyle.color === color ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
-                      }}
-                      onClick={() => handleColorApply(color)}
-                    />
-                  ))}
-                </div>
-
-                <p className="mb-2 text-xs font-medium text-slate-500">最近使用颜色</p>
-                <div className="mb-3 grid min-h-8 grid-cols-6 gap-2">
-                  {recentColors.length > 0 ? (
-                    recentColors.map((color) => (
-                      <button
-                        key={`recent-${color}`}
-                        type="button"
-                        className="h-7 w-7 rounded-full border border-slate-200"
-                        style={{
-                          backgroundColor: color,
-                          boxShadow: textStyle.color === color ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
-                        }}
-                        onClick={() => handleColorApply(color)}
-                      />
-                    ))
-                  ) : (
-                    <span className="col-span-6 text-[11px] text-slate-400">暂无最近使用</span>
-                  )}
-                </div>
-
-                <p className="mb-2 text-xs font-medium text-slate-500">预设色板</p>
-                <div className="grid grid-cols-6 gap-2">
-                  {COLOR_OPTIONS.map((color) => (
-                    <button
-                      key={`preset-${color}`}
-                      type="button"
-                      className="h-7 w-7 rounded-full border border-slate-200"
-                      style={{
-                        backgroundColor: color,
-                        boxShadow: textStyle.color === color ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
-                      }}
-                      onClick={() => handleColorApply(color)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-type TableToolbarProps = {
-  isMobile: boolean;
-  portalStyle: CSSProperties | null;
-  activeRowIndex: number;
-  activeColIndex: number;
-  rowCount: number;
-  colCount: number;
-  onInsertRowAbove: () => void;
-  onInsertRowBelow: () => void;
-  onDeleteCurrentRow: () => void;
-  onInsertColLeft: () => void;
-  onInsertColRight: () => void;
-  onDeleteCurrentCol: () => void;
-};
-
-function TableToolbar({
-  isMobile,
-  portalStyle,
-  activeRowIndex,
-  activeColIndex,
-  rowCount,
-  colCount,
-  onInsertRowAbove,
-  onInsertRowBelow,
-  onDeleteCurrentRow,
-  onInsertColLeft,
-  onInsertColRight,
-  onDeleteCurrentCol,
-}: TableToolbarProps) {
-  if (!portalStyle || typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div data-shape-toolbar="true" style={portalStyle} onPointerDown={(event) => event.stopPropagation()}>
-      <div
-        className={`flex max-w-[min(92vw,860px)] flex-nowrap items-center gap-1 overflow-x-auto rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "px-1.5 py-1" : "px-2 py-1"}`}
-      >
-        <div className="flex items-center gap-1">
-          <span
-            className={`whitespace-nowrap rounded-md border border-sky-200 bg-sky-50 text-sky-700 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          >
-            行 {activeRowIndex + 1}
-          </span>
-          <span
-            className={`whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 text-amber-700 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          >
-            列 {activeColIndex + 1}
-          </span>
-        </div>
-        <div className="h-4 w-px bg-slate-200" />
-        <button
-          type="button"
-          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          onClick={onInsertRowAbove}
-        >
-          上插行
-        </button>
-        <button
-          type="button"
-          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          onClick={onInsertRowBelow}
-        >
-          下插行
-        </button>
-        <button
-          type="button"
-          disabled={rowCount <= 1}
-          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          onClick={onDeleteCurrentRow}
-        >
-          删当前行
-        </button>
-        <div className="h-4 w-px bg-slate-200" />
-        <button
-          type="button"
-          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          onClick={onInsertColLeft}
-        >
-          左插列
-        </button>
-        <button
-          type="button"
-          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          onClick={onInsertColRight}
-        >
-          右插列
-        </button>
-        <button
-          type="button"
-          disabled={colCount <= 1}
-          className={`whitespace-nowrap rounded-md text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400 ${isMobile ? "px-1.5 py-1 text-[11px]" : "px-2 py-1 text-xs"}`}
-          onClick={onDeleteCurrentCol}
-        >
-          删当前列
-        </button>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-type ShapeStyleToolbarProps = {
-  isMobile: boolean;
-  portalStyle: CSSProperties | null;
-  isLineLikeShape: boolean;
-  fillColor: string;
-  borderColor: string;
-  borderWidth: number;
-  borderStyle: "solid" | "dashed" | "dotted";
-  onFillColorChange: (color: string) => void;
-  onBorderStyleChange: (style: "solid" | "dashed" | "dotted") => void;
-  onBorderColorChange: (color: string) => void;
-  onBorderWidthChange: (width: number) => void;
-};
-
-function ShapeStyleToolbar({
-  isMobile,
-  portalStyle,
-  isLineLikeShape,
-  fillColor,
-  borderColor,
-  borderWidth,
-  borderStyle,
-  onFillColorChange,
-  onBorderStyleChange,
-  onBorderColorChange,
-  onBorderWidthChange,
-}: ShapeStyleToolbarProps) {
-  const [activePanel, setActivePanel] = useState<"fill" | "border" | null>(null);
-  const toolbarRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const onPointerDownOutside = (event: PointerEvent) => {
-      if (!toolbarRef.current) {
-        return;
-      }
-
-      if (!toolbarRef.current.contains(event.target as Node)) {
-        setActivePanel(null);
-      }
-    };
-
-    document.addEventListener("pointerdown", onPointerDownOutside);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDownOutside);
-    };
-  }, []);
-
-  if (!portalStyle || typeof document === "undefined") {
-    return null;
-  }
-
-  return createPortal(
-    <div data-shape-toolbar="true" style={portalStyle} onPointerDown={(event) => event.stopPropagation()}>
-      <div ref={toolbarRef} className="relative">
-        <div
-          className={`flex items-center rounded-2xl border border-slate-300 bg-white shadow-[0_4px_18px_rgba(15,23,42,0.12)] ${isMobile ? "gap-1 px-1.5 py-1" : "min-w-max gap-2 px-2 py-1.5"}`}
-        >
-          <button
-            type="button"
-            className="flex h-8 cursor-pointer items-center gap-2 rounded-lg px-3 text-sm font-medium text-slate-800 transition-colors duration-200 hover:bg-slate-100"
-          >
-            <span className="grid h-6 w-6 place-items-center rounded-full bg-slate-900 text-white">
-              <Sparkles className="h-3.5 w-3.5" />
-            </span>
-            Ask AI
-          </button>
-          <div className="h-6 w-px bg-slate-200" />
-
-          {!isLineLikeShape ? (
-            <div className="relative">
-              <button
-                type="button"
-                className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-slate-700 transition-colors duration-200 hover:bg-slate-100"
-                onClick={() => setActivePanel((current) => (current === "fill" ? null : "fill"))}
-                aria-label="填充颜色"
-              >
-                <span
-                  className="h-5 w-5 rounded-full border border-slate-300"
-                  style={{ backgroundColor: fillColor }}
-                />
-                <ChevronDown
-                  className={`h-4 w-4 text-slate-600 transition-transform ${activePanel === "fill" ? "rotate-180" : ""}`}
-                />
-              </button>
-
-              {activePanel === "fill" ? (
-                <div className="absolute left-0 top-[calc(100%+12px)] z-30 w-[252px] rounded-2xl border border-slate-300 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
-                  <p className="mb-2 text-xs font-medium text-slate-500">填充颜色</p>
-                  <div className="grid grid-cols-6 gap-2">
-                    {SHAPE_FILL_OPTIONS.map((color) => (
-                      <button
-                        key={color}
-                        type="button"
-                        className="h-8 w-8 rounded-full border border-slate-200"
-                        style={{
-                          backgroundColor: color,
-                          boxShadow:
-                            color === fillColor ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
-                        }}
-                        onClick={() => onFillColorChange(color)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          <div className="relative">
-            <button
-              type="button"
-              className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-slate-700 transition-colors duration-200 hover:bg-slate-100"
-              onClick={() => setActivePanel((current) => (current === "border" ? null : "border"))}
-              aria-label="边框样式"
-            >
-              <AlignJustify className="h-4 w-4" />
-              <ChevronDown
-                className={`h-4 w-4 text-slate-600 transition-transform ${activePanel === "border" ? "rotate-180" : ""}`}
-              />
-            </button>
-
-            {activePanel === "border" ? (
-              <div className="absolute right-0 top-[calc(100%+12px)] z-30 w-[320px] rounded-2xl border border-slate-300 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
-                <p className="mb-3 text-sm font-medium text-slate-700">边框</p>
-
-                <div className="mb-3 grid grid-cols-3 gap-2">
-                  {BORDER_STYLE_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors duration-200 ${
-                        borderStyle === option.value
-                          ? "border-sky-300 bg-sky-50 text-sky-700"
-                          : "border-slate-200 text-slate-600 hover:bg-slate-100"
-                      }`}
-                      onClick={() => onBorderStyleChange(option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="mb-4 flex items-center gap-2">
-                  <span className="text-xs font-medium text-slate-500">粗细</span>
-                  <div className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-300 bg-white px-1">
-                    <button
-                      type="button"
-                      className="grid h-6 w-6 place-items-center rounded-md text-slate-600 transition-colors duration-200 hover:bg-slate-100"
-                      onClick={() => onBorderWidthChange(Math.max(0, borderWidth - 1))}
-                      aria-label="减小边框粗细"
-                    >
-                      <Minus className="h-3.5 w-3.5" />
-                    </button>
-                    <span className="min-w-8 text-center text-xs font-semibold text-slate-800">
-                      {borderWidth}
-                    </span>
-                    <button
-                      type="button"
-                      className="grid h-6 w-6 place-items-center rounded-md text-slate-600 transition-colors duration-200 hover:bg-slate-100"
-                      onClick={() => onBorderWidthChange(Math.min(24, borderWidth + 1))}
-                      aria-label="增加边框粗细"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                <p className="mb-2 text-sm text-slate-500">边框颜色</p>
-                <div className="grid grid-cols-6 gap-2">
-                  {SHAPE_BORDER_OPTIONS.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      className="h-8 w-8 rounded-full border border-slate-200"
-                      style={{
-                        backgroundColor: color,
-                        boxShadow:
-                          color === borderColor ? "0 0 0 2px rgba(14,116,244,0.35)" : undefined,
-                      }}
-                      onClick={() => onBorderColorChange(color)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="h-6 w-px bg-slate-200" />
-          <button
-            type="button"
-            className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-700 transition-colors duration-200 hover:bg-slate-100"
-          >
-            <Palette className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-slate-700 transition-colors duration-200 hover:bg-slate-100"
-          >
-            <BrushCleaning className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
