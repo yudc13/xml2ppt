@@ -716,8 +716,11 @@ function Toolbar({
   const setPendingInsertion = useSlideEditorStore((state) => state.setPendingInsertion);
   const bringToFront = useSlideEditorStore((state) => state.bringToFront);
   const sendToBack = useSlideEditorStore((state) => state.sendToBack);
+  const bringForward = useSlideEditorStore((state) => state.bringForward);
+  const sendBackward = useSlideEditorStore((state) => state.sendBackward);
   const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
   const copySelectedShape = useSlideEditorStore((state) => state.copySelectedShape);
+  const cutSelectedShape = useSlideEditorStore((state) => state.cutSelectedShape);
   const pasteCopiedShape = useSlideEditorStore((state) => state.pasteCopiedShape);
   const deleteSelectedShape = useSlideEditorStore((state) => state.deleteSelectedShape);
   const undo = useSlideEditorStore((state) => state.undo);
@@ -764,27 +767,74 @@ function Toolbar({
         return;
       }
 
-      if (isMeta && event.key.toLowerCase() === "c") {
-        event.preventDefault();
-        copySelectedShape();
-        return;
+      if (isMeta && event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        copySelectedShape()
+        toast.success('已复制形状')
+        return
       }
 
-      if (isMeta && event.key.toLowerCase() === "v") {
-        event.preventDefault();
-        pasteCopiedShape();
-        return;
+      if (isMeta && event.key.toLowerCase() === 'x') {
+        event.preventDefault()
+        cutSelectedShape()
+        toast.success('已剪切形状')
+        return
       }
 
-      if (event.key === "Delete" || event.key === "Backspace") {
-        event.preventDefault();
-        deleteSelectedShape();
+      if (isMeta && event.key.toLowerCase() === 'v') {
+        event.preventDefault()
+        pasteCopiedShape()
+        toast.success('已粘贴形状')
+        return
       }
-    };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [copySelectedShape, deleteSelectedShape, isPreviewMode, pasteCopiedShape, pendingInsertion, redo, setPendingInsertion, undo]);
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault()
+        deleteSelectedShape()
+        toast.success('已删除形状')
+        return
+      }
+
+      // Layering shortcuts
+      if (isMeta && event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault()
+        bringToFront()
+        return
+      }
+      if (isMeta && event.shiftKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault()
+        sendToBack()
+        return
+      }
+      if (isMeta && event.altKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault()
+        bringForward()
+        return
+      }
+      if (isMeta && event.altKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault()
+        sendBackward()
+        return
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    copySelectedShape,
+    cutSelectedShape,
+    deleteSelectedShape,
+    isPreviewMode,
+    pasteCopiedShape,
+    pendingInsertion,
+    redo,
+    setPendingInsertion,
+    undo,
+    bringToFront,
+    sendToBack,
+    bringForward,
+    sendBackward,
+  ])
 
   return (
     <div data-editor-toolbar="true" className="max-w-full overflow-x-auto">
