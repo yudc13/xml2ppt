@@ -1,12 +1,15 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 
 import { TOOLBAR_REGISTRY } from "../../configs/toolbar-registry";
+import { AiEditPopover } from "../ask-ai/ai-edit-popover";
 import type { TextStyleState } from "./types";
+import type { AiShapeContext, AiShapeEditResponse } from "@/lib/ai/types";
+import { Sparkles } from "lucide-react";
 
 interface ToolbarManagerProps {
-  shape: any; // Using any for simplicity in this refactor, but it should be SlideShapeModel | EditableSlideShape
+  shape: any;
   context: {
     isMobile: boolean;
     isSelected: boolean;
@@ -41,10 +44,13 @@ interface ToolbarManagerProps {
     onUpdateShapeBorderStyle: (style: "solid" | "dashed" | "dotted") => void;
     onUpdateShapeBorderColor: (color: string) => void;
     onUpdateShapeBorderWidth: (width: number) => void;
+    onApplyAiEditResult?: (result: AiShapeEditResponse) => void;
   };
 }
 
 export function ToolbarManager({ shape, context, state, actions }: ToolbarManagerProps) {
+  const [isAiPopoverOpen, setIsAiPopoverOpen] = useState(false);
+
   if (!context.isSelected) {
     return null;
   }
@@ -119,6 +125,62 @@ export function ToolbarManager({ shape, context, state, actions }: ToolbarManage
     return null;
   }
 
+  // Build shape context for AI
+  const shapeContext: AiShapeContext = {
+    shapeType: shape?.attributes?.type ?? "text",
+    contentHtml: shape?.contentHtml ?? "",
+    fillColor: state.backgroundColor || undefined,
+    borderColor: state.borderColor || undefined,
+    borderWidth: state.borderWidth || undefined,
+    borderStyle: state.borderStyle || undefined,
+  };
+
+  // Calculate AI popover position (below the toolbar)
+  const toolbarPortalStyle = context.textToolbarPortalStyle ?? context.portalStyle;
+  const aiPopoverStyle: CSSProperties | null = toolbarPortalStyle
+    ? {
+      position: "fixed" as const,
+      left: typeof toolbarPortalStyle.left === "number" ? toolbarPortalStyle.left : undefined,
+      top:
+        typeof toolbarPortalStyle.top === "number"
+          ? toolbarPortalStyle.top + 48
+          : undefined,
+      transform: "translate(-50%, 0)",
+      zIndex: 60,
+    }
+    : null;
+
   const ToolbarComponent = config.component;
-  return <ToolbarComponent {...props} />;
+
+  return (
+    <>
+      <ToolbarComponent
+        {...props}
+        aiButton={
+          <button
+            type="button"
+            onClick={() => setIsAiPopoverOpen((prev) => !prev)}
+            className={`grid h-8 w-8 place-items-center rounded-lg transition-colors ${isAiPopoverOpen
+                ? "bg-sky-100 text-sky-600"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              }`}
+            title="Ask AI"
+          >
+            <Sparkles className="h-4 w-4" />
+          </button>
+        }
+      />
+      <AiEditPopover
+        open={isAiPopoverOpen}
+        onClose={() => setIsAiPopoverOpen(false)}
+        portalStyle={aiPopoverStyle}
+        shapeContext={shapeContext}
+        onApplyResult={(result) => {
+          if (actions.onApplyAiEditResult) {
+            actions.onApplyAiEditResult(result);
+          }
+        }}
+      />
+    </>
+  );
 }

@@ -19,6 +19,11 @@ import { Header } from "@/features/deck-editor/components/header";
 import { PresentationPlayer } from "@/features/deck-editor/components/presentation-player";
 import { Sidebar } from "@/features/deck-editor/components/sidebar";
 import { SlideViewport } from "@/features/deck-editor/components/slide-viewport";
+import { AskAiDialog } from "@/features/deck-editor/components/ask-ai/ask-ai-dialog";
+import { convertAiSlideToModels } from "@/lib/ai/adapter";
+import { parseSlideXml } from "@/lib/slide-xml/parser";
+import { createBlankSlideXml } from "@/lib/slides/default-xml";
+import { serializeSlideDocument } from "@/lib/slide-xml/serializer";
 import {
   ApiRequestError,
   useCreateSlide,
@@ -33,7 +38,6 @@ import {
 import { useSlideEditorStore } from "@/features/slide-editor/store";
 import { TEXT_PRESET_OPTIONS } from "@/features/slide-editor/text-preset-config";
 import type { DeckEntity, PersistedSlide, SaveStatus, SlideRevisionEntity } from "@/features/deck-editor/types";
-import { serializeSlideDocument } from "@/lib/slide-xml/serializer";
 import { exportSlidesToPdf } from "@/features/deck-editor/lib/export/export-pdf";
 import { exportSlidesToPptx } from "@/features/deck-editor/lib/export/export-pptx";
 import {
@@ -107,6 +111,7 @@ export function DeckEditorClient({
   const [playerSessionKey, setPlayerSessionKey] = useState(0);
   const [isExporting, setIsExporting] = useState<null | "pdf" | "pptx">(null);
   const [slideClipboardXml, setSlideClipboardXml] = useState<string | null>(null);
+  const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
   const isSlideOperationPending = createSlide.isPending || deleteSlideHook.isPending || getSlides.isPending;
   const saveStatusTimeoutRef = useRef<number | null>(null);
 
@@ -568,6 +573,57 @@ export function DeckEditorClient({
     })();
   };
 
+  const handleAiConfirm = async (aiSlides: any[]) => {
+    const promise = (async () => {
+      // 1. Persist current slide
+      const ok = await persistActiveSlide();
+      if (!ok) throw new Error("保存当前幻灯片失败");
+
+      // 2. Prepare blank template
+      const blankXml = createBlankSlideXml();
+      const baseModel = parseSlideXml(blankXml);
+
+      try {
+        // 3. Batch generate slides
+        // We'll insert them one by one after the active slide index
+        let lastInsertedIndex = activeSlideIndex;
+
+        for (const aiSlide of aiSlides) {
+          const aiShapes = convertAiSlideToModels(aiSlide);
+          // 保留背景画布 shape（baseModel.shapes[0]），AI 内容追加在后面
+          const bgShape = baseModel.shapes[0];
+          const model = {
+            ...baseModel,
+            slideId: `slide-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+            shapes: bgShape ? [bgShape, ...aiShapes] : aiShapes,
+          };
+
+          const xmlContent = serializeSlideDocument(model);
+          const nextIndex = lastInsertedIndex + 1;
+
+          await createSlide.mutateAsync({
+            xmlContent,
+            position: nextIndex + 1 // +1 because position is 1-indexed and createSlide logic adds 1 to provided position? No, repository says position: position
+          });
+
+          lastInsertedIndex = nextIndex;
+        }
+
+        resetRevisionState();
+        setIsHistoryOpen(false);
+        await fetchAndSyncSlides(lastInsertedIndex);
+      } catch (err) {
+        throw err;
+      }
+    })();
+
+    toast.promise(promise, {
+      loading: "正在应用 AI 生成的幻灯片...",
+      success: "已成功添加 AI 幻灯片",
+      error: "应用 AI 幻灯片失败",
+    });
+  };
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#f2f4f7] font-sans text-slate-900">
       <Header
@@ -640,6 +696,7 @@ export function DeckEditorClient({
                 onRollbackRevision={handleRollbackRevision}
                 isRollingBack={rollbackSlide.isPending}
                 isPreviewingRevision={previewRevisionVersion !== null}
+                onAskAi={() => setIsAiDialogOpen(true)}
               />
             </div>
             <div className="flex flex-1 items-center justify-center">
@@ -659,6 +716,12 @@ export function DeckEditorClient({
         open={isPlayerOpen}
         slideXmlList={getFormalSlideXmlList()}
         onClose={() => setIsPlayerOpen(false)}
+      />
+
+      <AskAiDialog
+        open={isAiDialogOpen}
+        onOpenChange={setIsAiDialogOpen}
+        onConfirm={handleAiConfirm}
       />
     </div>
   );
@@ -693,6 +756,7 @@ function Toolbar({
   onRollbackRevision,
   isRollingBack,
   isPreviewingRevision,
+  onAskAi,
 }: {
   zoom: number;
   onZoomChange: (nextZoom: number) => void;
@@ -710,6 +774,7 @@ function Toolbar({
   onRollbackRevision: (version: number) => void;
   isRollingBack: boolean;
   isPreviewingRevision: boolean;
+  onAskAi: () => void;
 }) {
   const pendingInsertion = useSlideEditorStore((state) => state.pendingInsertion);
   const setPendingInsertion = useSlideEditorStore((state) => state.setPendingInsertion);
@@ -727,6 +792,8 @@ function Toolbar({
   const updateZoom = (nextZoom: number) => {
     onZoomChange(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom)));
   };
+
+
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -822,6 +889,7 @@ function Toolbar({
       <div className="flex min-w-max items-center rounded-2xl border border-slate-200/90 bg-white/95 px-1.5 py-1 shadow-[0_1px_6px_rgba(15,23,42,0.05)] backdrop-blur supports-[backdrop-filter]:bg-white/80">
         <button
           type="button"
+          onClick={onAskAi}
           className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
         >
           <span className="grid h-5 w-5 place-items-center rounded-full bg-slate-800 text-white">
