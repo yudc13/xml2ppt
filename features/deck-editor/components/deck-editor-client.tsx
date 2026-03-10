@@ -21,6 +21,7 @@ import { Sidebar } from "@/features/deck-editor/components/sidebar";
 import { SlideViewport } from "@/features/deck-editor/components/slide-viewport";
 import { AskAiDialog } from "@/features/deck-editor/components/ask-ai/ask-ai-dialog";
 import { convertAiSlideToModels } from "@/lib/ai/adapter";
+import type { AiSlideDSL } from "@/lib/ai/types";
 import { parseSlideXml } from "@/lib/slide-xml/parser";
 import { createBlankSlideXml } from "@/lib/slides/default-xml";
 import { serializeSlideDocument } from "@/lib/slide-xml/serializer";
@@ -573,7 +574,7 @@ export function DeckEditorClient({
     })();
   };
 
-  const handleAiConfirm = async (aiSlides: any[]) => {
+  const handleAiConfirm = async (aiSlides: AiSlideDSL[]) => {
     const promise = (async () => {
       // 1. Persist current slide
       const ok = await persistActiveSlide();

@@ -110,7 +110,7 @@ export function SlideViewport({
       const viewportElement = viewportRef.current;
       const targetNode = event.target as Node | null;
       const preserveSelectionSelectors =
-        "[data-shape-toolbar='true'], [data-shape-controls='true'], [data-editor-toolbar='true'], [data-slot^='context-menu']";
+        "[data-shape-toolbar='true'], [data-shape-controls='true'], [data-editor-toolbar='true'], [data-ai-popover='true'], [data-slot^='context-menu']";
 
       if (!viewportElement || !targetNode) {
         return;

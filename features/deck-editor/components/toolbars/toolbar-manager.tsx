@@ -9,7 +9,7 @@ import type { AiShapeContext, AiShapeEditResponse } from "@/lib/ai/types";
 import { Sparkles } from "lucide-react";
 
 interface ToolbarManagerProps {
-  shape: any;
+  shapeContext: AiShapeContext;
   context: {
     isMobile: boolean;
     isSelected: boolean;
@@ -48,7 +48,7 @@ interface ToolbarManagerProps {
   };
 }
 
-export function ToolbarManager({ shape, context, state, actions }: ToolbarManagerProps) {
+export function ToolbarManager({ shapeContext, context, state, actions }: ToolbarManagerProps) {
   const [isAiPopoverOpen, setIsAiPopoverOpen] = useState(false);
 
   if (!context.isSelected) {
@@ -57,7 +57,7 @@ export function ToolbarManager({ shape, context, state, actions }: ToolbarManage
 
   // Determine active toolbar based on context
   let activeToolbarType: string | null = null;
-  let props: any = {};
+  let props: Record<string, unknown> = {};
 
   if (context.hasRichTextContent && (!context.isEditing || context.textToolbarPortalStyle)) {
     activeToolbarType = "text";
@@ -124,16 +124,6 @@ export function ToolbarManager({ shape, context, state, actions }: ToolbarManage
   if (!config) {
     return null;
   }
-
-  // Build shape context for AI
-  const shapeContext: AiShapeContext = {
-    shapeType: shape?.attributes?.type ?? "text",
-    contentHtml: shape?.contentHtml ?? "",
-    fillColor: state.backgroundColor || undefined,
-    borderColor: state.borderColor || undefined,
-    borderWidth: state.borderWidth || undefined,
-    borderStyle: state.borderStyle || undefined,
-  };
 
   // Calculate AI popover position (below the toolbar)
   const toolbarPortalStyle = context.textToolbarPortalStyle ?? context.portalStyle;

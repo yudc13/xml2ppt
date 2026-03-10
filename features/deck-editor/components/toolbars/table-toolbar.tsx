@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 export type TableToolbarProps = {
@@ -10,6 +10,7 @@ export type TableToolbarProps = {
   activeColIndex: number;
   rowCount: number;
   colCount: number;
+  aiButton?: ReactNode;
   onInsertRowAbove: () => void;
   onInsertRowBelow: () => void;
   onDeleteCurrentRow: () => void;
@@ -25,6 +26,7 @@ export function TableToolbar({
   activeColIndex,
   rowCount,
   colCount,
+  aiButton,
   onInsertRowAbove,
   onInsertRowBelow,
   onDeleteCurrentRow,
@@ -112,6 +114,7 @@ export function TableToolbar({
         >
           删当前列
         </button>
+        {aiButton ? <div className="ml-1 flex items-center">{aiButton}</div> : null}
       </div>
     </div>,
     document.body,

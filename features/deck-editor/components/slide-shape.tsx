@@ -23,6 +23,8 @@ import type { EditableSlideShape } from "@/features/slide-editor/store";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { buildShapeContentHtml } from "@/lib/slide-xml/rich-text";
 import type { SlideShapeModel, TableModel, XmlNode, XmlValue } from "@/lib/slide-xml/types";
+import type { AiShapeContext, AiShapeEditResponse } from "@/lib/ai/types";
+import { createId } from "@/lib/utils";
 
 import { ToolbarManager } from "./toolbars/toolbar-manager";
 import {
@@ -318,6 +320,66 @@ function parseTableModel(contentNode: XmlValue | undefined): TableModel {
     .filter((row): row is TableModel["rows"][number] => Boolean(row && row.cells.length > 0));
 
   return { rows: parsedRows };
+}
+
+function buildTableContentNode(table: TableModel): XmlNode {
+  return {
+    table: {
+      row: table.rows.map((row) => ({
+        "@_id": row.id,
+        cell: row.cells.map((cell) => ({
+          "@_id": cell.id,
+          "#text": cell.text,
+        })),
+      })),
+    },
+  };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildTableContextHtml(table: TableModel): string {
+  if (!table.rows.length) {
+    return "";
+  }
+
+  const rows = table.rows
+    .map((row) => `<tr>${row.cells.map((cell) => `<td>${escapeHtml(cell.text)}</td>`).join("")}</tr>`)
+    .join("");
+
+  return `<table>${rows}</table>`;
+}
+
+function buildTableModelFromAi(
+  tableData: AiShapeEditResponse["tableData"],
+  previous: TableModel,
+): TableModel | null {
+  if (!tableData || !tableData.rows || tableData.rows.length === 0) {
+    return null;
+  }
+
+  const rows = tableData.rows.map((row, rowIndex) => {
+    const previousRow = previous.rows[rowIndex];
+    const rowId = previousRow?.id ?? createId(`row-${rowIndex + 1}`);
+    const cells = row.cells.map((cellText, cellIndex) => {
+      const previousCell = previousRow?.cells[cellIndex];
+      return {
+        id: previousCell?.id ?? createId(`cell-${rowIndex + 1}-${cellIndex + 1}`),
+        text: cellText,
+      };
+    });
+
+    return { id: rowId, cells };
+  });
+
+  return { rows };
 }
 
 function normalizeColor(value: string): string {
@@ -812,6 +874,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const isInteractive = interactive;
   const shapeId = "id" in shape ? shape.id : shape.attributes.id;
   const shapeType = shape.attributes.type;
+  const isTextShape = shapeType === "text";
   const isTableShape = shapeType === "table";
   const isEllipseShape = shapeType === "ellipse";
   const isLineShape = shapeType === "line";
@@ -842,6 +905,21 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
   const hasRichTextContent = !isTableShape && contentHtml.length > 0;
   const isShapeStyleTarget = !hasRichTextContent && !isTableShape;
   const tableModel = useMemo(() => parseTableModel(shape.rawNode.content), [shape.rawNode.content]);
+  const tableContextHtml = useMemo(
+    () => (isTableShape ? buildTableContextHtml(tableModel) : ""),
+    [isTableShape, tableModel],
+  );
+  const shapeContext = useMemo<AiShapeContext>(
+    () => ({
+      shapeType,
+      contentHtml: isTableShape ? tableContextHtml : contentHtml,
+      fillColor: backgroundColor ?? undefined,
+      borderColor: borderColor ?? undefined,
+      borderWidth: borderWidth ?? undefined,
+      borderStyle: borderStyle ?? undefined,
+    }),
+    [backgroundColor, borderColor, borderStyle, borderWidth, contentHtml, isTableShape, shapeType, tableContextHtml],
+  );
   const arrowMarkerId = useMemo(
     () => `shape-arrow-${shapeId.replace(/[^a-zA-Z0-9_-]/g, "")}`,
     [shapeId],
@@ -1305,6 +1383,71 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       setTextStyle(readSelectionTextStyle(element, slideUnitPx));
     },
     [slideUnitPx, syncShapeContentFromDom],
+  );
+
+  const applyAiEditResult = useCallback(
+    (result: AiShapeEditResponse) => {
+      const hasContentHtml = typeof result.contentHtml === "string";
+      const hasTableData = Boolean(result.tableData?.rows?.length);
+      const hasFillColor = typeof result.fillColor === "string";
+      const hasBorderColor = typeof result.borderColor === "string";
+      const hasBorderWidth = Number.isFinite(result.borderWidth);
+      const hasBorderStyle =
+        result.borderStyle === "solid" || result.borderStyle === "dashed" || result.borderStyle === "dotted";
+
+      if (!hasContentHtml && !hasTableData && !hasFillColor && !hasBorderColor && !hasBorderWidth && !hasBorderStyle) {
+        return;
+      }
+
+      captureHistorySnapshot();
+
+      if (isTableShape && hasTableData) {
+        const nextTableModel = buildTableModelFromAi(result.tableData, tableModel);
+        if (nextTableModel) {
+          updateShapeContent(shapeId, "", buildTableContentNode(nextTableModel));
+        }
+      } else if (isTextShape && hasContentHtml) {
+        const nextHtml = result.contentHtml ?? "";
+        const contentNode = contentHtmlToXmlNode(nextHtml, shape.rawNode.content);
+        updateShapeContent(shapeId, nextHtml, contentNode);
+        const element = editableRef.current;
+        if (isEditing && element) {
+          element.innerHTML = nextHtml;
+          resizeTextShapeToContent("content");
+          setTextStyle(readSelectionTextStyle(element, slideUnitPx));
+        }
+      }
+
+      if (hasFillColor && result.fillColor) {
+        updateShapeFillColor(shapeId, result.fillColor);
+      }
+      if (hasBorderStyle && result.borderStyle) {
+        updateShapeBorderStyle(shapeId, result.borderStyle);
+      }
+      if (hasBorderColor && result.borderColor) {
+        updateShapeBorderColor(shapeId, result.borderColor);
+      }
+      if (hasBorderWidth) {
+        updateShapeBorderWidth(shapeId, result.borderWidth ?? borderWidth);
+      }
+    },
+    [
+      borderWidth,
+      captureHistorySnapshot,
+      isTextShape,
+      isEditing,
+      isTableShape,
+      resizeTextShapeToContent,
+      shape.rawNode.content,
+      shapeId,
+      slideUnitPx,
+      tableModel,
+      updateShapeBorderColor,
+      updateShapeBorderStyle,
+      updateShapeBorderWidth,
+      updateShapeContent,
+      updateShapeFillColor,
+    ],
   );
 
   const beginDrag = (event: ReactPointerEvent<HTMLElement>) => {
@@ -1780,7 +1923,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         </div>
 
         <ToolbarManager
-          shape={shape}
+          shapeContext={shapeContext}
           context={{
             isMobile,
             isSelected,
@@ -1827,6 +1970,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
               captureHistorySnapshot();
               updateShapeBorderWidth(shapeId, width);
             },
+            onApplyAiEditResult: applyAiEditResult,
           }}
         />
 
@@ -1910,4 +2054,3 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     </>
   );
 }
-

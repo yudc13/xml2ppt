@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -18,6 +18,7 @@ export type TextFormatToolbarProps = {
   isMobile: boolean;
   portalStyle: CSSProperties | null;
   textStyle: TextStyleState;
+  aiButton?: ReactNode;
   onApplyAlign: (align: TextStyleState["textAlign"]) => void;
   onApplyListType: (listType: TextStyleState["listType"]) => void;
   onApplyFont: (fontFamily: string) => void;
@@ -29,6 +30,7 @@ export function TextFormatToolbar({
   isMobile,
   portalStyle,
   textStyle,
+  aiButton,
   onApplyAlign,
   onApplyListType,
   onApplyFont,
@@ -302,6 +304,8 @@ export function TextFormatToolbar({
               </div>
             ) : null}
           </div>
+
+          {aiButton ? <div className="ml-1 flex items-center">{aiButton}</div> : null}
         </div>
       </div>
     </div>,

@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -19,6 +19,7 @@ export type ShapeStyleToolbarProps = {
   borderColor: string;
   borderWidth: number;
   borderStyle: "solid" | "dashed" | "dotted";
+  aiButton?: ReactNode;
   onFillColorChange: (color: string) => void;
   onBorderStyleChange: (style: "solid" | "dashed" | "dotted") => void;
   onBorderColorChange: (color: string) => void;
@@ -33,6 +34,7 @@ export function ShapeStyleToolbar({
   borderColor,
   borderWidth,
   borderStyle,
+  aiButton,
   onFillColorChange,
   onBorderStyleChange,
   onBorderColorChange,
@@ -164,7 +166,7 @@ export function ShapeStyleToolbar({
                           ? "border-sky-500 bg-sky-50 text-sky-700"
                           : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                         }`}
-                      onClick={() => onBorderStyleChange(style.value as any)}
+                      onClick={() => onBorderStyleChange(style.value)}
                     >
                       {style.label}
                     </button>
@@ -191,6 +193,8 @@ export function ShapeStyleToolbar({
               </div>
             ) : null}
           </div>
+
+          {aiButton ? <div className="ml-1 flex items-center">{aiButton}</div> : null}
         </div>
       </div>
     </div>,
