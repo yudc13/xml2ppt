@@ -839,6 +839,89 @@ function contentHtmlToXmlNode(html: string, previousContent: XmlValue | undefine
   return contentNode;
 }
 
+function normalizePlainText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function extractPlainTextFromHtml(html: string): string {
+  if (!html) {
+    return "";
+  }
+
+  const parser = new DOMParser();
+  const documentNode = parser.parseFromString(`<div>${html}</div>`, "text/html");
+  const wrapper = documentNode.body.firstElementChild as HTMLElement | null;
+  if (!wrapper) {
+    return "";
+  }
+
+  return normalizePlainText(wrapper.textContent ?? "");
+}
+
+function stripTrailingEmptyNodes(container: HTMLElement): void {
+  let node: ChildNode | null = container.lastChild;
+
+  while (node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (!node.textContent || node.textContent.trim().length === 0) {
+        const prev = node.previousSibling;
+        node.remove();
+        node = prev;
+        continue;
+      }
+      break;
+    }
+
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const element = node as HTMLElement;
+      const tag = element.tagName.toLowerCase();
+      const text = element.textContent?.trim() ?? "";
+      const hasNonTextChild = Boolean(element.querySelector("img, table, svg, video"));
+      const isEmptyBlock = text.length === 0 && !hasNonTextChild;
+
+      if (isEmptyBlock && (tag === "br" || tag === "div" || tag === "p" || tag === "span")) {
+        const prev = node.previousSibling;
+        element.remove();
+        node = prev;
+        continue;
+      }
+    }
+
+    break;
+  }
+}
+
+function hasTrailingEmptyBlock(container: HTMLElement): boolean {
+  let node: ChildNode | null = container.lastChild;
+  while (node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (!node.textContent || node.textContent.trim().length === 0) {
+        node = node.previousSibling;
+        continue;
+      }
+      return false;
+    }
+
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const element = node as HTMLElement;
+      const tag = element.tagName.toLowerCase();
+      const text = element.textContent?.trim() ?? "";
+      const hasNonTextChild = Boolean(element.querySelector("img, table, svg, video"));
+      const isEmptyBlock = text.length === 0 && !hasNonTextChild;
+      const hasOnlyBr = element.childElementCount === 1 && element.firstElementChild?.tagName.toLowerCase() === "br";
+
+      if (isEmptyBlock && (tag === "div" || tag === "p" || tag === "span" || hasOnlyBr)) {
+        return true;
+      }
+      return false;
+    }
+
+    return false;
+  }
+
+  return false;
+}
+
 export function SlideShape({ shape, viewportRef, interactive = false }: SlideShapeProps) {
   const isMobile = useIsMobile();
   const selectedShapeId = useSlideEditorStore((state) => state.selectedShapeId);
@@ -1057,6 +1140,15 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       const computed = window.getComputedStyle(element);
       const lineHeightPx = getLineHeightPx(computed);
 
+      if (mode === "content") {
+        const trailingEmptyLine = hasTrailingEmptyBlock(element) ? lineHeightPx : 0;
+        const measuredHeightPx = Math.max(0, element.scrollHeight - trailingEmptyLine);
+        const safeUnit = Number.isFinite(slideUnitPx) && slideUnitPx > 0 ? slideUnitPx : 1;
+        const heightInSlide = Math.max(MIN_SHAPE_SIZE, measuredHeightPx / safeUnit);
+        updateShapeSize(shapeId, shape.attributes.width, heightInSlide);
+        return;
+      }
+
       const clone = element.cloneNode(true) as HTMLDivElement;
       clone.contentEditable = "false";
       clone.style.position = "fixed";
@@ -1064,12 +1156,28 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       clone.style.top = "-9999px";
       clone.style.visibility = "hidden";
       clone.style.pointerEvents = "none";
-      clone.style.width = "max-content";
+      const shouldLockWidth = mode === "content";
+      const widthPx =
+        shouldLockWidth && element.clientWidth > 0
+          ? element.clientWidth
+          : element.scrollWidth || element.clientWidth;
+      clone.style.width = shouldLockWidth ? `${widthPx}px` : "max-content";
       clone.style.height = "auto";
       clone.style.minWidth = "0";
       clone.style.maxWidth = "none";
-      clone.style.whiteSpace = "pre";
+      clone.style.whiteSpace = shouldLockWidth ? "normal" : "pre";
       clone.style.overflow = "visible";
+      stripTrailingEmptyNodes(clone);
+
+      const computedElement = window.getComputedStyle(element);
+      const slideUnitValue = computedElement.getPropertyValue("--slide-unit");
+      if (slideUnitValue) {
+        clone.style.setProperty("--slide-unit", slideUnitValue);
+      }
+      const slideFontScaleValue = computedElement.getPropertyValue("--slide-font-scale");
+      if (slideFontScaleValue) {
+        clone.style.setProperty("--slide-font-scale", slideFontScaleValue);
+      }
 
       document.body.appendChild(clone);
       const measuredWidthPx = clone.scrollWidth;
@@ -1081,10 +1189,38 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       const contentHeightPx = mode === "single-line" ? lineHeightPx : measuredHeightPx;
       const heightInSlide = Math.max(MIN_SHAPE_SIZE, contentHeightPx / safeUnit);
 
-      updateShapeSize(shapeId, widthInSlide, heightInSlide);
+      if (mode === "single-line") {
+        updateShapeSize(shapeId, widthInSlide, heightInSlide);
+      } else {
+        updateShapeSize(shapeId, shape.attributes.width, heightInSlide);
+      }
     },
-    [hasRichTextContent, shapeId, slideUnitPx, updateShapeSize],
+    [hasRichTextContent, shape.attributes.width, shapeId, slideUnitPx, updateShapeSize],
   );
+
+  const adjustTextShapeSizeAfterStyleChange = useCallback(() => {
+    const element = editableRef.current;
+    if (!element) {
+      return;
+    }
+
+    const { clientHeight, clientWidth, scrollHeight, scrollWidth } = element;
+    if (clientHeight <= 0 || clientWidth <= 0) {
+      return;
+    }
+
+    const isOverflowing =
+      scrollHeight - clientHeight > 1 || scrollWidth - clientWidth > 1;
+    if (!isOverflowing) {
+      return;
+    }
+
+    const computed = window.getComputedStyle(element);
+    const lineHeightPx = getLineHeightPx(computed);
+    const isSingleLine = scrollHeight <= lineHeightPx * 1.2;
+
+    resizeTextShapeToContent(isSingleLine ? "single-line" : "content");
+  }, [resizeTextShapeToContent]);
 
   useEffect(() => {
     if (!viewportRef) {
@@ -1266,6 +1402,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         setTextStyle(readSelectionTextStyle(element, slideUnitPx));
         draftTextStyleRef.current = null;
         syncShapeContentFromDom();
+        adjustTextShapeSizeAfterStyleChange();
         return;
       }
 
@@ -1308,11 +1445,12 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 
       applyStyleToEntireContent(element, apply);
       syncShapeContentFromDom();
-      resizeTextShapeToContent("content");
+      adjustTextShapeSizeAfterStyleChange();
       draftTextStyleRef.current = nextDraft;
       setTextStyle(nextDraft);
     },
     [
+      adjustTextShapeSizeAfterStyleChange,
       syncShapeContentFromDom,
       textStyle.color,
       textStyle.fontFamily,
@@ -1345,8 +1483,9 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 
       syncShapeContentFromDom();
       setTextStyle(readSelectionTextStyle(element, slideUnitPx));
+      adjustTextShapeSizeAfterStyleChange();
     },
-    [slideUnitPx, syncShapeContentFromDom],
+    [adjustTextShapeSizeAfterStyleChange, slideUnitPx, syncShapeContentFromDom],
   );
 
   const applyListType = useCallback(
@@ -1381,8 +1520,9 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
 
       syncShapeContentFromDom();
       setTextStyle(readSelectionTextStyle(element, slideUnitPx));
+      adjustTextShapeSizeAfterStyleChange();
     },
-    [slideUnitPx, syncShapeContentFromDom],
+    [adjustTextShapeSizeAfterStyleChange, slideUnitPx, syncShapeContentFromDom],
   );
 
   const applyAiEditResult = useCallback(
@@ -1408,12 +1548,19 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         }
       } else if (isTextShape && hasContentHtml) {
         const nextHtml = result.contentHtml ?? "";
+        const beforeText = extractPlainTextFromHtml(contentHtml);
+        const afterText = extractPlainTextFromHtml(nextHtml);
+        const isStyleOnlyChange = beforeText === afterText;
         const contentNode = contentHtmlToXmlNode(nextHtml, shape.rawNode.content);
         updateShapeContent(shapeId, nextHtml, contentNode);
         const element = editableRef.current;
         if (isEditing && element) {
           element.innerHTML = nextHtml;
-          resizeTextShapeToContent("content");
+          if (isStyleOnlyChange) {
+            adjustTextShapeSizeAfterStyleChange();
+          } else {
+            resizeTextShapeToContent("content");
+          }
           setTextStyle(readSelectionTextStyle(element, slideUnitPx));
         }
       }
@@ -1434,10 +1581,12 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
     [
       borderWidth,
       captureHistorySnapshot,
+      contentHtml,
       isTextShape,
       isEditing,
       isTableShape,
       resizeTextShapeToContent,
+      adjustTextShapeSizeAfterStyleChange,
       shape.rawNode.content,
       shapeId,
       slideUnitPx,
