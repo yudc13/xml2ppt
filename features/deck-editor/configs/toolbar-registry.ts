@@ -8,7 +8,7 @@ export type ToolbarType = 'text' | 'table' | 'shape'
 
 export interface ToolbarConfig {
 	type: ToolbarType
-	component: ComponentType<Record<string, unknown>>
+	component: ComponentType<any>
 	priority: number
 }
 

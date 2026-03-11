@@ -1156,7 +1156,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
       clone.style.top = "-9999px";
       clone.style.visibility = "hidden";
       clone.style.pointerEvents = "none";
-      const shouldLockWidth = mode === "content";
+      const shouldLockWidth = false;
       const widthPx =
         shouldLockWidth && element.clientWidth > 0
           ? element.clientWidth
@@ -1569,7 +1569,10 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
         updateShapeFillColor(shapeId, result.fillColor);
       }
       if (hasBorderStyle && result.borderStyle) {
-        updateShapeBorderStyle(shapeId, result.borderStyle);
+        updateShapeBorderStyle(
+          shapeId,
+          result.borderStyle as "solid" | "dashed" | "dotted",
+        );
       }
       if (hasBorderColor && result.borderColor) {
         updateShapeBorderColor(shapeId, result.borderColor);

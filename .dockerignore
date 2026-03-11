@@ -1,0 +1,18 @@
+# Dependencies
+node_modules
+
+# Next.js build output
+.next
+
+# Logs
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+
+# Git
+.git
+
+# Vercel
+.vercel

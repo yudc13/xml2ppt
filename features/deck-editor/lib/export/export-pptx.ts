@@ -85,13 +85,13 @@ async function appendShape(
 	if (type === 'table') {
 		const rows = parseTable(shape)
 		if (rows.length > 0) {
-			slide.addTable(rows, {
+			slide.addTable(rows as unknown as PptxGenJS.TableRow[], {
 				x,
 				y,
 				w,
 				h,
 				fontSize: 12,
-				valign: 'mid',
+				valign: 'middle',
 				border: {
 					type: 'solid',
 					pt: 1,
@@ -178,6 +178,12 @@ type TextRunStyle = {
 	underline?: boolean
 }
 
+type UnderlineOption = { style?: 'sng'; color?: string }
+
+function resolveUnderlineOption(underline?: boolean): UnderlineOption | undefined {
+	return underline ? { style: 'sng' } : undefined
+}
+
 function isPrimitiveText(value: XmlValue | undefined): value is string | number | boolean {
 	return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
 }
@@ -246,7 +252,7 @@ function buildRunsFromXml(
 					fontSize: baseStyle.fontSize,
 					bold: baseStyle.bold,
 					italic: baseStyle.italic,
-					underline: baseStyle.underline,
+					underline: resolveUnderlineOption(baseStyle.underline),
 				},
 			},
 		]
@@ -269,7 +275,7 @@ function buildRunsFromXml(
 				fontSize: resolvedStyle.fontSize,
 				bold: resolvedStyle.bold,
 				italic: resolvedStyle.italic,
-				underline: resolvedStyle.underline,
+				underline: resolveUnderlineOption(resolvedStyle.underline),
 			},
 		})
 	}
