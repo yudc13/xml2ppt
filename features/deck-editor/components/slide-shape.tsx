@@ -1989,7 +1989,7 @@ export function SlideShape({ shape, viewportRef, interactive = false }: SlideSha
           ) : hasRichTextContent ? (
             <div
               ref={editableRef}
-              className="h-full w-full [&_ol]:ml-6 [&_ol]:list-decimal [&_ol]:pl-2 [&_ul]:ml-6 [&_ul]:list-disc [&_ul]:pl-2 [&_li]:leading-[1.5]"
+              className="h-full w-full [&_ol]:ml-[calc(var(--slide-unit)*24)] [&_ol]:list-decimal [&_ol]:pl-[calc(var(--slide-unit)*8)] [&_ul]:ml-[calc(var(--slide-unit)*24)] [&_ul]:list-disc [&_ul]:pl-[calc(var(--slide-unit)*8)] [&_li]:leading-[1.5]"
               contentEditable={isInteractive && isEditing}
               style={{ cursor: isDraggableTextShape ? "move" : undefined }}
               suppressContentEditableWarning
