@@ -145,7 +145,7 @@ export function SlideViewport({
               <div
                 ref={viewportRef}
                 className={cn(
-                  "relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-white shadow-[0_8px_30px_rgba(15,23,42,0.08)] [--slide-unit:calc(100cqw/960)]",
+                  "relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-white text-[calc(var(--slide-unit)*16)] leading-normal shadow-[0_8px_30px_rgba(15,23,42,0.08)] [--slide-unit:calc(100cqw/960)]",
                   pendingInsertion && "cursor-crosshair",
                 )}
                 onContextMenu={(event) => {
