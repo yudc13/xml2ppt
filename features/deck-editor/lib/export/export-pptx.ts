@@ -169,20 +169,152 @@ function getListItems(value: XmlValue | undefined): XmlValue[] {
 	return toArray((value as XmlNode).li as XmlValue | XmlValue[] | undefined)
 }
 
-function listItemToText(item: XmlValue): string {
+type TextRunStyle = {
+	color: string
+	fontFace: string
+	fontSize: number
+	bold?: boolean
+	italic?: boolean
+	underline?: boolean
+}
+
+function isPrimitiveText(value: XmlValue | undefined): value is string | number | boolean {
+	return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+}
+
+function normalizeFontFamily(value: unknown, fallback: string): string {
+	if (typeof value === 'string' && value.trim().length > 0) {
+		return value
+	}
+	return fallback
+}
+
+function normalizeFontSize(value: unknown, fallback: number): number {
+	const numeric = Number(value)
+	return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback
+}
+
+function resolveTextStyle(
+	node: XmlNode,
+	tagName: string | null,
+	baseStyle: TextRunStyle
+): TextRunStyle {
+	const nextStyle: TextRunStyle = { ...baseStyle }
+	if (tagName === 'strong' || tagName === 'b') {
+		nextStyle.bold = true
+	}
+	if (tagName === 'em' || tagName === 'i') {
+		nextStyle.italic = true
+	}
+	if (tagName === 'u') {
+		nextStyle.underline = true
+	}
+
+	if (node['@_color']) {
+		nextStyle.color = parseColor(String(node['@_color'])).hex
+	}
+	if (node['@_fontFamily']) {
+		nextStyle.fontFace = normalizeFontFamily(node['@_fontFamily'], baseStyle.fontFace)
+	}
+	if (node['@_fontSize']) {
+		nextStyle.fontSize = normalizeFontSize(node['@_fontSize'], baseStyle.fontSize)
+	}
+
+	return nextStyle
+}
+
+function buildRunsFromXml(
+	value: XmlValue | undefined,
+	baseStyle: TextRunStyle,
+	tagName: string | null = null
+): PptxGenJS.TextProps[] {
+	if (value === undefined || value === null) {
+		return []
+	}
+
+	if (isPrimitiveText(value)) {
+		const text = String(value)
+		if (text.length === 0) {
+			return []
+		}
+		return [
+			{
+				text,
+				options: {
+					color: baseStyle.color,
+					fontFace: baseStyle.fontFace,
+					fontSize: baseStyle.fontSize,
+					bold: baseStyle.bold,
+					italic: baseStyle.italic,
+					underline: baseStyle.underline,
+				},
+			},
+		]
+	}
+
+	if (Array.isArray(value)) {
+		return value.flatMap((item) => buildRunsFromXml(item, baseStyle, tagName))
+	}
+
+	const node = value as XmlNode
+	const resolvedStyle = resolveTextStyle(node, tagName, baseStyle)
+	const runs: PptxGenJS.TextProps[] = []
+
+	if (typeof node['#text'] === 'string' && node['#text'].length > 0) {
+		runs.push({
+			text: node['#text'],
+			options: {
+				color: resolvedStyle.color,
+				fontFace: resolvedStyle.fontFace,
+				fontSize: resolvedStyle.fontSize,
+				bold: resolvedStyle.bold,
+				italic: resolvedStyle.italic,
+				underline: resolvedStyle.underline,
+			},
+		})
+	}
+
+	for (const [key, child] of Object.entries(node)) {
+		if (key.startsWith('@_') || key === '#text') {
+			continue
+		}
+		runs.push(...buildRunsFromXml(child as XmlValue, resolvedStyle, key))
+	}
+
+	return runs
+}
+
+function listItemToRuns(item: XmlValue, baseStyle: TextRunStyle): PptxGenJS.TextProps[] {
 	if (!item || typeof item !== 'object' || Array.isArray(item)) {
-		return extractText(item).trim()
+		return buildRunsFromXml(item, baseStyle)
 	}
 
 	const node = item as XmlNode
 	if (node.p) {
-		return toArray(node.p as XmlValue | XmlValue[] | undefined)
-			.map((paragraph) => extractText(paragraph).trim())
-			.filter(Boolean)
-			.join(' ')
+		const paragraphs = toArray(node.p as XmlValue | XmlValue[] | undefined)
+		return paragraphs.flatMap((paragraph) => buildRunsFromXml(paragraph, baseStyle, 'p'))
 	}
 
-	return extractText(node).trim()
+	return buildRunsFromXml(node, baseStyle)
+}
+
+function pushRunsWithBreak(
+	target: PptxGenJS.TextProps[],
+	runs: PptxGenJS.TextProps[]
+) {
+	if (runs.length === 0) {
+		return
+	}
+	const lastIndex = runs.length - 1
+	runs.forEach((run, index) => {
+		target.push({
+			text: run.text,
+			options: {
+				...run.options,
+				breakLine: index === lastIndex,
+			},
+		})
+	})
 }
 
 function buildTextRuns(
@@ -199,35 +331,29 @@ function buildTextRuns(
 
 	const paragraphs = toArray(contentNode.p as XmlValue | XmlValue[] | undefined)
 	for (const paragraph of paragraphs) {
-		const text = extractText(paragraph).trim()
-		if (!text) {
+		const paragraphRuns = buildRunsFromXml(paragraph, baseOptions, 'p')
+		if (paragraphRuns.length === 0) {
 			continue
 		}
-
-		runs.push({
-			text,
-			options: {
-				...baseOptions,
-				breakLine: true,
-			},
-		})
+		pushRunsWithBreak(runs, paragraphRuns)
 	}
 
 	const unorderedGroups = toArray(contentNode.ul as XmlValue | XmlValue[] | undefined)
 	unorderedGroups.forEach((group, groupIndex) => {
 		const items = getListItems(group)
-		const lines = items.map((item) => listItemToText(item)).filter(Boolean)
-
-		if (lines.length > 0) {
+		items.forEach((item) => {
+			const itemRuns = listItemToRuns(item, baseOptions)
+			if (itemRuns.length === 0) {
+				return
+			}
 			runs.push({
-				text: lines.join('\n'),
+				text: '• ',
 				options: {
 					...baseOptions,
-					bullet: true,
-					breakLine: true,
 				},
 			})
-		}
+			pushRunsWithBreak(runs, itemRuns)
+		})
 
 		if (groupIndex < unorderedGroups.length - 1) {
 			runs.push({
@@ -244,18 +370,19 @@ function buildTextRuns(
 	const orderedGroups = toArray(contentNode.ol as XmlValue | XmlValue[] | undefined)
 	orderedGroups.forEach((group, groupIndex) => {
 		const items = getListItems(group)
-		const lines = items.map((item) => listItemToText(item)).filter(Boolean)
-
-		if (lines.length > 0) {
+		items.forEach((item, index) => {
+			const itemRuns = listItemToRuns(item, baseOptions)
+			if (itemRuns.length === 0) {
+				return
+			}
 			runs.push({
-				text: lines.join('\n'),
+				text: `${index + 1}. `,
 				options: {
 					...baseOptions,
-					bullet: { type: 'number' },
-					breakLine: true,
 				},
 			})
-		}
+			pushRunsWithBreak(runs, itemRuns)
+		})
 
 		if (groupIndex < orderedGroups.length - 1) {
 			runs.push({
