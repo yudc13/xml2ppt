@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { UserButton } from "@clerk/nextjs";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, CircleAlert, Eye, EyeOff, History, Loader2, MonitorPlay, Save, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Eye, EyeOff, History, Loader2, MonitorPlay, Save, Share2, X } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +19,7 @@ type HeaderProps = {
   showLogo?: boolean;
   onSave?: () => void;
   onOpenHistory?: () => void;
+  onOpenShare?: () => void;
   onTogglePreview?: () => void;
   onPlay?: () => void;
   onExportPdf?: () => void;
@@ -29,6 +30,7 @@ type HeaderProps = {
   isDirty?: boolean;
   isPreviewMode?: boolean;
   disableSave?: boolean;
+  disableShare?: boolean;
   disablePlay?: boolean;
   disableExport?: boolean;
 };
@@ -40,6 +42,7 @@ export function Header({
   showLogo = true,
   onSave,
   onOpenHistory,
+  onOpenShare,
   onTogglePreview,
   onPlay,
   onExportPdf,
@@ -50,6 +53,7 @@ export function Header({
   isDirty = false,
   isPreviewMode = false,
   disableSave = false,
+  disableShare = false,
   disablePlay = false,
   disableExport = false,
 }: HeaderProps) {
@@ -241,6 +245,15 @@ export function Header({
           >
             <History className="h-3.5 w-3.5" />
             历史版本
+          </button>
+          <button
+            type="button"
+            onClick={onOpenShare}
+            disabled={disableShare}
+            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            分享
           </button>
           <button
             type="button"

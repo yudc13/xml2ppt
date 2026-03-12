@@ -12,6 +12,7 @@ export type DeckEntity = {
   title: string;
   createdAt: string;
   updatedAt: string;
+  accessRole?: "owner" | "editor" | "commenter" | "viewer";
 };
 
 export type SlideRevisionEntity = {
@@ -25,3 +26,29 @@ export type SlideRevisionEntity = {
 };
 
 export type SaveStatus = "idle" | "success" | "error" | "conflict";
+
+export type SharePermission = "viewer" | "commenter" | "editor";
+
+export type DeckShareLinkEntity = {
+  id: string;
+  deckId: string;
+  permission: SharePermission;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdBy: string;
+  createdAt: string;
+};
+
+export type CommentEntity = {
+  id: string;
+  deckId: string;
+  slideId: string;
+  shapeId: string | null;
+  parentId: string | null;
+  content: string;
+  status: "open" | "resolved";
+  authorId: string;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};

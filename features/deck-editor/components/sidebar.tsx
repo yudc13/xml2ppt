@@ -50,6 +50,7 @@ interface SidebarProps {
   onDuplicateSlide?: (index: number) => void;
   canPaste?: boolean;
   isLoading?: boolean;
+  readOnly?: boolean;
 }
 
 export function Sidebar({
@@ -69,6 +70,7 @@ export function Sidebar({
   onDuplicateSlide,
   canPaste = false,
   isLoading = false,
+  readOnly = false,
 }: SidebarProps) {
   return (
     <UiSidebar
@@ -81,6 +83,7 @@ export function Sidebar({
           <Button
             variant="outline"
             onClick={() => onCreateSlide?.()}
+            disabled={readOnly}
             className="h-8 flex-1 justify-center gap-1.5 rounded-xl border-slate-200/90 bg-white/95 px-2 py-1.5 text-xs font-medium text-slate-700 shadow-[0_1px_6px_rgba(15,23,42,0.05)] transition-colors duration-200 hover:bg-slate-100/80 focus-visible:ring-2 focus-visible:ring-sky-200 group-data-[collapsible=icon]:hidden"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -119,6 +122,7 @@ export function Sidebar({
                 onDuplicate={() => onDuplicateSlide?.(index)}
                 onCreateNew={() => onCreateSlide?.(index)}
                 canPaste={canPaste}
+                readOnly={readOnly}
               />
             ))}
           </div>
@@ -292,6 +296,7 @@ function SlideThumbnail({
   onDuplicate,
   onCreateNew,
   canPaste,
+  readOnly = false,
 }: {
   number: number;
   slideIndex: number;
@@ -309,6 +314,7 @@ function SlideThumbnail({
   onDuplicate?: () => void;
   onCreateNew?: () => void;
   canPaste?: boolean;
+  readOnly?: boolean;
 }) {
   const handleActivateByContextMenu = () => {
     if (!isActive) {
@@ -344,28 +350,28 @@ function SlideThumbnail({
       </div>
 
       <ContextMenuContent className="w-48">
-        <ContextMenuItem onClick={onCut}>
+        <ContextMenuItem onClick={onCut} disabled={readOnly}>
           <Scissors className="mr-2 h-4 w-4" />
           <span>剪切</span>
           <ContextMenuShortcut>⌘X</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onClick={onCopy}>
+        <ContextMenuItem onClick={onCopy} disabled={readOnly}>
           <Copy className="mr-2 h-4 w-4" />
           <span>复制</span>
           <ContextMenuShortcut>⌘C</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onClick={onPaste} disabled={!canPaste}>
+        <ContextMenuItem onClick={onPaste} disabled={!canPaste || readOnly}>
           <Clipboard className="mr-2 h-4 w-4" />
           <span>粘贴</span>
           <ContextMenuShortcut>⌘V</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={onCreateNew}>
+        <ContextMenuItem onClick={onCreateNew} disabled={readOnly}>
           <PlusCircle className="mr-2 h-4 w-4" />
           <span>新建幻灯片</span>
           <ContextMenuShortcut>Enter</ContextMenuShortcut>
         </ContextMenuItem>
-        <ContextMenuItem onClick={onDuplicate}>
+        <ContextMenuItem onClick={onDuplicate} disabled={readOnly}>
           <CopyPlus className="mr-2 h-4 w-4" />
           <span>复制幻灯片</span>
           <ContextMenuShortcut>⌘D</ContextMenuShortcut>
@@ -373,6 +379,7 @@ function SlideThumbnail({
         <ContextMenuSeparator />
         <ContextMenuItem
           onClick={onDelete}
+          disabled={readOnly}
           className="text-red-600 focus:bg-red-50 focus:text-red-600"
         >
           <Trash2 className="mr-2 h-4 w-4" />

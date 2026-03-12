@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { auth } from '@clerk/nextjs/server'
 
 import { apiError, apiOk } from '@/lib/api/response'
-import { createSlide, getDeckById, getSlidesByDeckId } from '@/lib/db/repository'
+import { resolveDeckAccess } from '@/lib/auth/deck-access'
+import { createSlide, getSlidesByDeckId } from '@/lib/db/repository'
 import { getAuthenticatedUser } from '@/lib/auth/user'
 
 const paramsSchema = z.object({
@@ -31,8 +31,8 @@ export async function GET(_: Request, context: RouteContext) {
 	}
 
 	try {
-		const deck = await getDeckById(parsedParams.data.deckId, user.id)
-		if (!deck) {
+		const access = await resolveDeckAccess(parsedParams.data.deckId, user.id)
+		if (!access.canView) {
 			return apiError('Deck not found', 'DECK_NOT_FOUND', 404)
 		}
 
@@ -68,9 +68,9 @@ export async function POST(request: Request, context: RouteContext) {
 	}
 
 	try {
-		const deck = await getDeckById(parsedParams.data.deckId, user.id)
-		if (!deck) {
-			return apiError('Deck not found', 'DECK_NOT_FOUND', 404)
+		const access = await resolveDeckAccess(parsedParams.data.deckId, user.id)
+		if (!access.canEdit) {
+			return apiError('Forbidden', 'FORBIDDEN', 403)
 		}
 
 		const slide = await createSlide(

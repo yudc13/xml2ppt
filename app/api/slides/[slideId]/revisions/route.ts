@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 import { apiError, apiOk } from '@/lib/api/response'
-import { listSlideRevisions, verifySlideOwnership } from '@/lib/db/repository'
+import { getSlideAccessRole, listSlideRevisions } from '@/lib/db/repository'
 import { getAuthenticatedUser } from '@/lib/auth/user'
 
 const paramsSchema = z.object({
@@ -28,8 +28,8 @@ export async function GET(request: Request, context: RouteContext) {
 		return apiError('Invalid slide id', 'INVALID_SLIDE_ID', 400)
 	}
 
-	const isOwner = await verifySlideOwnership(parsedParams.data.slideId, user.id)
-	if (!isOwner) {
+	const access = await getSlideAccessRole(parsedParams.data.slideId, user.id)
+	if (!access) {
 		return apiError('Slide not found or unauthorized', 'SLIDE_NOT_FOUND', 404)
 	}
 

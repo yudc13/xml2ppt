@@ -8,7 +8,9 @@ export type ToolbarType = 'text' | 'table' | 'shape'
 
 export interface ToolbarConfig {
 	type: ToolbarType
-	component: ComponentType
+	// Dynamic toolbar dispatch needs heterogeneous prop types.
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	component: ComponentType<any>
 	priority: number
 }
 

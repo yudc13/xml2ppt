@@ -49,11 +49,13 @@ export function SlideViewport({
   slideXml,
   zoom = DEFAULT_ZOOM,
   forceModelRender = false,
+  readOnly = false,
 }: {
   slideIndex?: number;
   slideXml?: string;
   zoom?: number;
   forceModelRender?: boolean;
+  readOnly?: boolean;
 }) {
   const model = useMemo(() => parseSlideXml(slideXml ?? ""), [slideXml]);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -99,7 +101,7 @@ export function SlideViewport({
   const safeZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
   const viewportWidth = (BASE_VIEWPORT_WIDTH * safeZoom) / 100;
   const shouldUseStoreShapes = !forceModelRender && isHydrated && currentSlideIndex === slideIndex;
-  const interactiveEnabled = shouldUseStoreShapes && !isPreviewMode && !pendingInsertion;
+  const interactiveEnabled = shouldUseStoreShapes && !isPreviewMode && !pendingInsertion && !readOnly;
 
   useEffect(() => {
     initializeSlide(slideIndex, model, slideXml ?? "");
@@ -146,7 +148,7 @@ export function SlideViewport({
                 ref={viewportRef}
                 className={cn(
                   "relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-white text-[calc(var(--slide-unit)*16)] leading-normal shadow-[0_8px_30px_rgba(15,23,42,0.08)] [--slide-unit:calc(100cqw/960)]",
-                  pendingInsertion && "cursor-crosshair",
+                  pendingInsertion && !readOnly && "cursor-crosshair",
                 )}
                 onContextMenu={(event) => {
                   const rect = event.currentTarget.getBoundingClientRect();
@@ -158,7 +160,7 @@ export function SlideViewport({
                   };
                 }}
                 onPointerDown={(event) => {
-                  if (pendingInsertion) {
+                  if (!readOnly && pendingInsertion) {
                     event.preventDefault();
                     event.stopPropagation();
 
@@ -226,6 +228,9 @@ export function SlideViewport({
             <ContextMenuItem
               className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
               onClick={() => {
+                if (readOnly) {
+                  return;
+                }
                 copySelectedShape();
                 toast.success("已复制形状", {
                   icon: <Copy className="h-4 w-4 text-sky-600" />,
@@ -243,6 +248,9 @@ export function SlideViewport({
             <ContextMenuItem
               className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
               onClick={() => {
+                if (readOnly) {
+                  return;
+                }
                 cutSelectedShape();
                 toast.success("已剪切形状", {
                   icon: <Scissors className="h-4 w-4 text-sky-600" />,
@@ -258,9 +266,12 @@ export function SlideViewport({
             </ContextMenuItem>
 
             <ContextMenuItem
-              disabled={!clipboardShape}
+              disabled={!clipboardShape || readOnly}
               className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
               onClick={() => {
+                if (readOnly) {
+                  return;
+                }
                 pasteCopiedShape(lastContextMenuPos.current ?? undefined);
                 toast.success("已粘贴形状", {
                   icon: <Clipboard className="h-4 w-4 text-sky-600" />,
@@ -286,6 +297,7 @@ export function SlideViewport({
                 <ContextMenuItem
                   className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100"
                   onClick={bringToFront}
+                  disabled={readOnly}
                 >
                   <ArrowUpToLine className="h-4 w-4 text-slate-500 group-hover:text-indigo-600" />
                   <span>置于顶层</span>
@@ -293,6 +305,7 @@ export function SlideViewport({
                 <ContextMenuItem
                   className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100"
                   onClick={bringForward}
+                  disabled={readOnly}
                 >
                   <ArrowUp className="h-4 w-4 text-slate-500 group-hover:text-indigo-600" />
                   <span>上移一层</span>
@@ -300,6 +313,7 @@ export function SlideViewport({
                 <ContextMenuItem
                   className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100"
                   onClick={sendBackward}
+                  disabled={readOnly}
                 >
                   <ArrowDown className="h-4 w-4 text-slate-500 group-hover:text-indigo-600" />
                   <span>下移一层</span>
@@ -307,6 +321,7 @@ export function SlideViewport({
                 <ContextMenuItem
                   className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100"
                   onClick={sendToBack}
+                  disabled={readOnly}
                 >
                   <ArrowDownToLine className="h-4 w-4 text-slate-500 group-hover:text-indigo-600" />
                   <span>置于底层</span>
@@ -323,6 +338,7 @@ export function SlideViewport({
                 <ContextMenuItem
                   className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100"
                   onClick={() => alignSelectedShape("left")}
+                  disabled={readOnly}
                 >
                   <AlignLeft className="h-4 w-4 text-slate-500 group-hover:text-amber-600" />
                   <span>左对齐</span>
@@ -330,6 +346,7 @@ export function SlideViewport({
                 <ContextMenuItem
                   className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100"
                   onClick={() => alignSelectedShape("center")}
+                  disabled={readOnly}
                 >
                   <AlignCenter className="h-4 w-4 text-slate-500 group-hover:text-amber-600" />
                   <span>水平居中</span>
@@ -337,6 +354,7 @@ export function SlideViewport({
                 <ContextMenuItem
                   className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100"
                   onClick={() => alignSelectedShape("right")}
+                  disabled={readOnly}
                 >
                   <AlignRight className="h-4 w-4 text-slate-500 group-hover:text-amber-600" />
                   <span>右对齐</span>
@@ -345,6 +363,7 @@ export function SlideViewport({
                 <ContextMenuItem
                   className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100"
                   onClick={() => alignSelectedShape("top")}
+                  disabled={readOnly}
                 >
                   <AlignStartVertical className="h-4 w-4 text-slate-500 group-hover:text-amber-600" />
                   <span>顶部对齐</span>
@@ -352,6 +371,7 @@ export function SlideViewport({
                 <ContextMenuItem
                   className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100"
                   onClick={() => alignSelectedShape("middle")}
+                  disabled={readOnly}
                 >
                   <AlignCenterVertical className="h-4 w-4 text-slate-500 group-hover:text-amber-600" />
                   <span>垂直居中</span>
@@ -359,6 +379,7 @@ export function SlideViewport({
                 <ContextMenuItem
                   className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100"
                   onClick={() => alignSelectedShape("bottom")}
+                  disabled={readOnly}
                 >
                   <AlignEndVertical className="h-4 w-4 text-slate-500 group-hover:text-amber-600" />
                   <span>底部对齐</span>
@@ -371,6 +392,9 @@ export function SlideViewport({
             <ContextMenuItem
               className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-red-50 hover:text-red-600 data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
               onClick={() => {
+                if (readOnly) {
+                  return;
+                }
                 deleteSelectedShape();
                 toast.success("已删除形状", {
                   icon: <Trash2 className="h-4 w-4 text-red-500" />,
@@ -387,9 +411,12 @@ export function SlideViewport({
           </>
         ) : (
           <ContextMenuItem
-            disabled={!clipboardShape}
+            disabled={!clipboardShape || readOnly}
             className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
             onClick={() => {
+              if (readOnly) {
+                return;
+              }
               pasteCopiedShape(lastContextMenuPos.current ?? undefined);
               toast.success("已粘贴形状", {
                 icon: <Clipboard className="h-4 w-4 text-sky-600" />,

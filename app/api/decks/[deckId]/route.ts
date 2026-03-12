@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { apiError, apiOk } from '@/lib/api/response'
+import { resolveDeckAccess } from '@/lib/auth/deck-access'
 import { getDeckById, updateDeckTitle } from '@/lib/db/repository'
 import { getAuthenticatedUser } from '@/lib/auth/user'
 
@@ -29,7 +30,12 @@ export async function GET(_: Request, context: RouteContext) {
 	}
 
 	try {
-		const deck = await getDeckById(parsedParams.data.deckId, user.id)
+		const access = await resolveDeckAccess(parsedParams.data.deckId, user.id)
+		if (!access.canView) {
+			return apiError('Deck not found', 'DECK_NOT_FOUND', 404)
+		}
+
+		const deck = await getDeckById(parsedParams.data.deckId)
 		if (!deck) {
 			return apiError('Deck not found', 'DECK_NOT_FOUND', 404)
 		}
@@ -65,6 +71,11 @@ export async function PATCH(request: Request, context: RouteContext) {
 	}
 
 	try {
+		const access = await resolveDeckAccess(parsedParams.data.deckId, user.id)
+		if (access.role !== 'owner') {
+			return apiError('Forbidden', 'FORBIDDEN', 403)
+		}
+
 		const deck = await updateDeckTitle(parsedParams.data.deckId, parsedPayload.data.title, user.id)
 		if (!deck) {
 			return apiError('Deck not found', 'DECK_NOT_FOUND', 404)

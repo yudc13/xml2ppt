@@ -1,27 +1,118 @@
-import { and, asc, desc, eq, max, sql } from 'drizzle-orm'
+import { createHash, randomBytes } from 'node:crypto'
+
+import { and, asc, desc, eq, gt, isNull, max, or, sql } from 'drizzle-orm'
 
 import { getDb } from '@/lib/db/client'
 import {
+	comments,
+	deckMembers,
 	decks,
+	deckShareLinks,
 	slideRevisions,
 	slides,
 	users,
+	type Comment,
 	type Deck,
+	type DeckMember,
+	type DeckShareLink,
 	type Slide,
 	type SlideRevision,
 	type User,
 } from '@/lib/db/schema'
 import { createBlankSlideXml } from '@/lib/slides/default-xml'
 
-export async function verifySlideOwnership(slideId: string, userId: string): Promise<boolean> {
+export type DeckAccessRole = 'owner' | 'editor' | 'commenter' | 'viewer'
+export type SharePermission = 'viewer' | 'commenter' | 'editor'
+
+const ROLE_WEIGHT: Record<DeckAccessRole, number> = {
+	viewer: 1,
+	commenter: 2,
+	editor: 3,
+	owner: 4,
+}
+
+function hashShareToken(token: string): string {
+	const secret = process.env.SHARE_LINK_SECRET ?? process.env.CLERK_SECRET_KEY ?? 'share-link-fallback'
+	return createHash('sha256').update(`${secret}:${token}`).digest('hex')
+}
+
+function pickStrongerRole(current: DeckAccessRole, incoming: DeckAccessRole): DeckAccessRole {
+	return ROLE_WEIGHT[current] >= ROLE_WEIGHT[incoming] ? current : incoming
+}
+
+function permissionToRole(permission: SharePermission): Exclude<DeckAccessRole, 'owner'> {
+	if (permission === 'editor') {
+		return 'editor'
+	}
+	if (permission === 'commenter') {
+		return 'commenter'
+	}
+	return 'viewer'
+}
+
+export async function getDeckAccessRole(deckId: string, userId: string): Promise<DeckAccessRole | null> {
+	const db = getDb()
+
+	const [ownerDeck] = await db
+		.select({ id: decks.id })
+		.from(decks)
+		.where(and(eq(decks.id, deckId), eq(decks.userId, userId)))
+		.limit(1)
+	if (ownerDeck) {
+		return 'owner'
+	}
+
+	const [member] = await db
+		.select({ role: deckMembers.role })
+		.from(deckMembers)
+		.where(and(eq(deckMembers.deckId, deckId), eq(deckMembers.userId, userId)))
+		.limit(1)
+
+	if (!member) {
+		return null
+	}
+
+	if (member.role === 'editor' || member.role === 'commenter' || member.role === 'viewer') {
+		return member.role
+	}
+
+	return null
+}
+
+export async function getSlideDeckInfo(slideId: string): Promise<{ deckId: string } | null> {
 	const db = getDb()
 	const [result] = await db
-		.select({ id: slides.id })
+		.select({ deckId: slides.deckId })
 		.from(slides)
-		.innerJoin(decks, eq(slides.deckId, decks.id))
-		.where(and(eq(slides.id, slideId), eq(decks.userId, userId)))
+		.where(eq(slides.id, slideId))
 		.limit(1)
-	return !!result
+
+	return result ?? null
+}
+
+export async function getSlideAccessRole(
+	slideId: string,
+	userId: string
+): Promise<{ role: DeckAccessRole; deckId: string } | null> {
+	const slideInfo = await getSlideDeckInfo(slideId)
+	if (!slideInfo) {
+		return null
+	}
+
+	const role = await getDeckAccessRole(slideInfo.deckId, userId)
+	if (!role) {
+		return null
+	}
+
+	return {
+		role,
+		deckId: slideInfo.deckId,
+	}
+}
+
+export async function verifySlideOwnership(slideId: string, userId: string): Promise<boolean> {
+	const access = await getSlideAccessRole(slideId, userId)
+	return access?.role === 'owner'
 }
 
 export async function createDeck(title: string, userId: string): Promise<Deck> {
@@ -32,7 +123,25 @@ export async function createDeck(title: string, userId: string): Promise<Deck> {
 
 export async function listDecks(userId: string): Promise<Deck[]> {
 	const db = getDb()
-	return db.select().from(decks).where(eq(decks.userId, userId)).orderBy(desc(decks.updatedAt))
+
+	const ownedDecks = await db.select().from(decks).where(eq(decks.userId, userId))
+	const sharedDecks = await db
+		.select({ deck: decks })
+		.from(deckMembers)
+		.innerJoin(decks, eq(deckMembers.deckId, decks.id))
+		.where(eq(deckMembers.userId, userId))
+
+	const deckMap = new Map<string, Deck>()
+	for (const deck of ownedDecks) {
+		deckMap.set(deck.id, deck)
+	}
+	for (const row of sharedDecks) {
+		if (!deckMap.has(row.deck.id)) {
+			deckMap.set(row.deck.id, row.deck)
+		}
+	}
+
+	return [...deckMap.values()].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
 }
 
 export async function getDeckById(deckId: string, userId?: string): Promise<Deck | null> {
@@ -92,8 +201,6 @@ export async function createSlide(
 		let insertPosition: number
 		if (typeof position === 'number') {
 			insertPosition = position
-			// Shift slides at or after this position using negative numbers to avoid unique constraint violations
-			// Step 1: Shift to negative range
 			await tx
 				.update(slides)
 				.set({ position: sql`-(${slides.position} + 1)` })
@@ -124,7 +231,6 @@ export async function createSlide(
 			reason: 'create',
 		})
 
-		// Step 2: Flip negative positions back to positive
 		if (typeof position === 'number') {
 			await tx
 				.update(slides)
@@ -144,23 +250,18 @@ export async function deleteSlide(slideId: string): Promise<boolean> {
 			return false
 		}
 
-		// Delete revisions first (due to foreign keys)
 		await tx.delete(slideRevisions).where(eq(slideRevisions.slideId, slideId))
 
-		// Delete the slide
 		const [deleted] = await tx.delete(slides).where(eq(slides.id, slideId)).returning()
-
 		if (!deleted) {
 			return false
 		}
 
-		// Shift back slides after the deleted position using negative numbers
 		await tx
 			.update(slides)
 			.set({ position: sql`-(${slides.position} - 1)` })
 			.where(and(eq(slides.deckId, slide.deckId), sql`${slides.position} > ${slide.position}`))
 
-		// Flip back to positive
 		await tx
 			.update(slides)
 			.set({ position: sql`abs(${slides.position})` })
@@ -307,6 +408,273 @@ export async function rollbackSlideToRevision(params: {
 	}
 
 	return { status: 'updated', slide: rolledBack }
+}
+
+export async function createDeckShareLink(
+	deckId: string,
+	createdBy: string,
+	input: { permission: SharePermission; expiresAt?: string }
+): Promise<{ link: DeckShareLink; shareUrl: string }> {
+	const db = getDb()
+	const token = randomBytes(32).toString('base64url')
+	const tokenHash = hashShareToken(token)
+
+	const [created] = await db
+		.insert(deckShareLinks)
+		.values({
+			deckId,
+			tokenHash,
+			permission: input.permission,
+			expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+			createdBy,
+		})
+		.returning()
+
+	const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '')
+	const shareUrl = baseUrl ? `${baseUrl}/share/${token}` : `/share/${token}`
+
+	return { link: created, shareUrl }
+}
+
+export async function listDeckShareLinks(deckId: string): Promise<DeckShareLink[]> {
+	const db = getDb()
+	return db
+		.select()
+		.from(deckShareLinks)
+		.where(eq(deckShareLinks.deckId, deckId))
+		.orderBy(desc(deckShareLinks.createdAt))
+}
+
+export async function canManageShareLink(linkId: string, userId: string): Promise<boolean> {
+	const db = getDb()
+	const [link] = await db
+		.select({ deckId: deckShareLinks.deckId })
+		.from(deckShareLinks)
+		.where(eq(deckShareLinks.id, linkId))
+		.limit(1)
+
+	if (!link) {
+		return false
+	}
+
+	const role = await getDeckAccessRole(link.deckId, userId)
+	return role === 'owner' || role === 'editor'
+}
+
+export async function revokeDeckShareLink(linkId: string): Promise<boolean> {
+	const db = getDb()
+	const [updated] = await db
+		.update(deckShareLinks)
+		.set({ revokedAt: sql`now()` })
+		.where(and(eq(deckShareLinks.id, linkId), isNull(deckShareLinks.revokedAt)))
+		.returning({ id: deckShareLinks.id })
+
+	return !!updated
+}
+
+export async function resolveShareToken(
+	token: string
+): Promise<{ deckId: string; permission: SharePermission } | null> {
+	const db = getDb()
+	const tokenHash = hashShareToken(token)
+
+	const [link] = await db
+		.select({
+			deckId: deckShareLinks.deckId,
+			permission: deckShareLinks.permission,
+		})
+		.from(deckShareLinks)
+		.where(
+			and(
+				eq(deckShareLinks.tokenHash, tokenHash),
+				isNull(deckShareLinks.revokedAt),
+				or(isNull(deckShareLinks.expiresAt), gt(deckShareLinks.expiresAt, sql`now()`))
+			)
+		)
+		.limit(1)
+
+	if (!link) {
+		return null
+	}
+
+	if (
+		link.permission !== 'viewer' &&
+		link.permission !== 'commenter' &&
+		link.permission !== 'editor'
+	) {
+		return null
+	}
+
+	return {
+		deckId: link.deckId,
+		permission: link.permission,
+	}
+}
+
+export async function upsertDeckMemberByShare(
+	deckId: string,
+	userId: string,
+	permission: SharePermission
+): Promise<DeckMember | null> {
+	const db = getDb()
+
+	const [ownerDeck] = await db
+		.select({ id: decks.id })
+		.from(decks)
+		.where(and(eq(decks.id, deckId), eq(decks.userId, userId)))
+		.limit(1)
+	if (ownerDeck) {
+		return null
+	}
+
+	const incomingRole = permissionToRole(permission)
+	const [existing] = await db
+		.select()
+		.from(deckMembers)
+		.where(and(eq(deckMembers.deckId, deckId), eq(deckMembers.userId, userId)))
+		.limit(1)
+
+	const nextRole = existing
+		? pickStrongerRole(existing.role as DeckAccessRole, incomingRole)
+		: incomingRole
+
+	const [member] = await db
+		.insert(deckMembers)
+		.values({
+			deckId,
+			userId,
+			role: nextRole,
+		})
+		.onConflictDoUpdate({
+			target: [deckMembers.deckId, deckMembers.userId],
+			set: {
+				role: nextRole,
+				updatedAt: sql`now()`,
+			},
+		})
+		.returning()
+
+	return member
+}
+
+export async function listCommentsBySlide(deckId: string, slideId: string): Promise<Comment[]> {
+	const db = getDb()
+	return db
+		.select()
+		.from(comments)
+		.where(
+			and(eq(comments.deckId, deckId), eq(comments.slideId, slideId), isNull(comments.deletedAt))
+		)
+		.orderBy(asc(comments.createdAt))
+}
+
+export async function createComment(
+	deckId: string,
+	authorId: string,
+	input: { slideId: string; shapeId?: string; parentId?: string; content: string }
+): Promise<Comment | null> {
+	const db = getDb()
+
+	const [slide] = await db
+		.select({ id: slides.id })
+		.from(slides)
+		.where(and(eq(slides.id, input.slideId), eq(slides.deckId, deckId)))
+		.limit(1)
+	if (!slide) {
+		return null
+	}
+
+	if (input.parentId) {
+		const [parent] = await db
+			.select({ id: comments.id })
+			.from(comments)
+			.where(and(eq(comments.id, input.parentId), eq(comments.deckId, deckId), isNull(comments.deletedAt)))
+			.limit(1)
+		if (!parent) {
+			return null
+		}
+	}
+
+	const [created] = await db
+		.insert(comments)
+		.values({
+			deckId,
+			slideId: input.slideId,
+			shapeId: input.shapeId ?? null,
+			parentId: input.parentId ?? null,
+			content: input.content,
+			authorId,
+		})
+		.returning()
+
+	return created
+}
+
+export async function updateComment(
+	commentId: string,
+	input: { content?: string; status?: 'open' | 'resolved' }
+): Promise<Comment | null> {
+	const db = getDb()
+	const [updated] = await db
+		.update(comments)
+		.set({
+			...(input.content ? { content: input.content } : {}),
+			...(input.status ? { status: input.status } : {}),
+			updatedAt: sql`now()`,
+		})
+		.where(and(eq(comments.id, commentId), isNull(comments.deletedAt)))
+		.returning()
+
+	return updated ?? null
+}
+
+export async function softDeleteComment(commentId: string): Promise<boolean> {
+	const db = getDb()
+	const [updated] = await db
+		.update(comments)
+		.set({
+			deletedAt: sql`now()`,
+			updatedAt: sql`now()`,
+		})
+		.where(and(eq(comments.id, commentId), isNull(comments.deletedAt)))
+		.returning({ id: comments.id })
+
+	return !!updated
+}
+
+export async function verifyCommentPermission(
+	commentId: string,
+	userId: string,
+	action: 'edit' | 'delete' | 'resolve'
+): Promise<boolean> {
+	const db = getDb()
+	const [target] = await db
+		.select({
+			authorId: comments.authorId,
+			deckId: comments.deckId,
+		})
+		.from(comments)
+		.where(and(eq(comments.id, commentId), isNull(comments.deletedAt)))
+		.limit(1)
+
+	if (!target) {
+		return false
+	}
+
+	if (target.authorId === userId) {
+		return true
+	}
+
+	const role = await getDeckAccessRole(target.deckId, userId)
+	if (!role) {
+		return false
+	}
+
+	if (action === 'resolve') {
+		return role === 'owner' || role === 'editor' || role === 'commenter'
+	}
+
+	return role === 'owner' || role === 'editor'
 }
 
 export async function upsertUserByClerk(params: {

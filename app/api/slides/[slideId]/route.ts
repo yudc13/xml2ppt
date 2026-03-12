@@ -1,8 +1,7 @@
 import { z } from 'zod'
-import { auth } from '@clerk/nextjs/server'
 
 import { apiError, apiOk } from '@/lib/api/response'
-import { deleteSlide, updateSlideContent, verifySlideOwnership } from '@/lib/db/repository'
+import { deleteSlide, getSlideAccessRole, updateSlideContent } from '@/lib/db/repository'
 import { getAuthenticatedUser } from '@/lib/auth/user'
 
 const paramsSchema = z.object({
@@ -31,9 +30,12 @@ export async function PATCH(request: Request, context: RouteContext) {
 		return apiError('Invalid slide id', 'INVALID_SLIDE_ID', 400)
 	}
 
-	const isOwner = await verifySlideOwnership(parsedParams.data.slideId, user.id)
-	if (!isOwner) {
+	const access = await getSlideAccessRole(parsedParams.data.slideId, user.id)
+	if (!access) {
 		return apiError('Slide not found or unauthorized', 'SLIDE_NOT_FOUND', 404)
+	}
+	if (access.role !== 'owner' && access.role !== 'editor') {
+		return apiError('Forbidden', 'FORBIDDEN', 403)
 	}
 
 	let payload: unknown
@@ -87,9 +89,12 @@ export async function DELETE(_: Request, context: RouteContext) {
 		return apiError('Invalid slide id', 'INVALID_SLIDE_ID', 400)
 	}
 
-	const isOwner = await verifySlideOwnership(parsedParams.data.slideId, user.id)
-	if (!isOwner) {
+	const access = await getSlideAccessRole(parsedParams.data.slideId, user.id)
+	if (!access) {
 		return apiError('Slide not found or unauthorized', 'SLIDE_NOT_FOUND', 404)
+	}
+	if (access.role !== 'owner' && access.role !== 'editor') {
+		return apiError('Forbidden', 'FORBIDDEN', 403)
 	}
 
 	try {

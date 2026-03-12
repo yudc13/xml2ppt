@@ -20,6 +20,7 @@ import { PresentationPlayer } from "@/features/deck-editor/components/presentati
 import { Sidebar } from "@/features/deck-editor/components/sidebar";
 import { SlideViewport } from "@/features/deck-editor/components/slide-viewport";
 import { AskAiDialog } from "@/features/deck-editor/components/ask-ai/ask-ai-dialog";
+import { ShareDialog } from "@/features/deck-editor/components/share-dialog";
 import { convertAiSlideToModels } from "@/lib/ai/adapter";
 import type { AiSlideDSL } from "@/lib/ai/types";
 import { parseSlideXml } from "@/lib/slide-xml/parser";
@@ -113,8 +114,12 @@ export function DeckEditorClient({
   const [isExporting, setIsExporting] = useState<null | "pdf" | "pptx">(null);
   const [slideClipboardXml, setSlideClipboardXml] = useState<string | null>(null);
   const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const isSlideOperationPending = createSlide.isPending || deleteSlideHook.isPending || getSlides.isPending;
   const saveStatusTimeoutRef = useRef<number | null>(null);
+  const canEditDeck = initialDeck.accessRole === "owner" || initialDeck.accessRole === "editor";
+
+  console.log("initialDeck", initialDeck);
 
   const activeSlide = slides[activeSlideIndex] ?? null;
   const currentSlideXml = previewRevisionXml ?? activeSlide?.xmlContent;
@@ -220,6 +225,9 @@ export function DeckEditorClient({
 
   const persistActiveSlide = async (options?: { showStatus?: boolean }) => {
     const showStatus = options?.showStatus ?? false;
+    if (!canEditDeck) {
+      return true;
+    }
     if (!activeSlide || saveSlide.isPending) {
       return !saveSlide.isPending;
     }
@@ -631,17 +639,20 @@ export function DeckEditorClient({
         backHref="/"
         showLogo={false}
         title={deckTitle}
-        onTitleSave={async (nextTitle) => {
-          try {
-            const updated = await updateDeckTitle.mutateAsync(nextTitle);
-            setDeckTitle(updated.title);
-            return true;
-          } catch {
-            return false;
+        onTitleSave={initialDeck.accessRole === "owner"
+          ? async (nextTitle) => {
+            try {
+              const updated = await updateDeckTitle.mutateAsync(nextTitle);
+              setDeckTitle(updated.title);
+              return true;
+            } catch {
+              return false;
+            }
           }
-        }}
+          : undefined}
         onSave={handleManualSave}
         onOpenHistory={handleOpenHistory}
+        onOpenShare={canEditDeck ? () => setIsShareDialogOpen(true) : undefined}
         onTogglePreview={() => setPreviewMode(!isPreviewMode)}
         onPlay={handlePlay}
         onExportPdf={() => handleExport("pdf")}
@@ -651,7 +662,8 @@ export function DeckEditorClient({
         saveStatus={saveStatus}
         isDirty={isDirty}
         isPreviewMode={isPreviewMode}
-        disableSave={previewRevisionVersion !== null}
+        disableSave={previewRevisionVersion !== null || !canEditDeck}
+        disableShare={!canEditDeck}
         disablePlay={previewRevisionVersion !== null}
         disableExport={previewRevisionVersion !== null}
       />
@@ -667,14 +679,15 @@ export function DeckEditorClient({
             activeSlideRenderXml={currentSlideXml}
             forceActiveSlideModelRender={previewRevisionVersion !== null}
             onSlideSelect={handleSelectSlide}
-            onCreateSlide={handleCreateSlide}
-            onCopySlide={handleCopySlide}
-            onCutSlide={handleCutSlide}
-            onPasteSlide={handlePasteSlide}
-            onDeleteSlide={handleDeleteSlide}
-            onDuplicateSlide={handleDuplicateSlide}
+            onCreateSlide={canEditDeck ? handleCreateSlide : undefined}
+            onCopySlide={canEditDeck ? handleCopySlide : undefined}
+            onCutSlide={canEditDeck ? handleCutSlide : undefined}
+            onPasteSlide={canEditDeck ? handlePasteSlide : undefined}
+            onDeleteSlide={canEditDeck ? handleDeleteSlide : undefined}
+            onDuplicateSlide={canEditDeck ? handleDuplicateSlide : undefined}
             canPaste={!!slideClipboardXml}
             isLoading={isSlideOperationPending}
+            readOnly={!canEditDeck}
           />
 
           <SidebarInset className="flex flex-1 flex-col overflow-auto bg-[#f8fafc]/50 p-8">
@@ -698,6 +711,7 @@ export function DeckEditorClient({
                 isRollingBack={rollbackSlide.isPending}
                 isPreviewingRevision={previewRevisionVersion !== null}
                 onAskAi={() => setIsAiDialogOpen(true)}
+                readOnly={!canEditDeck}
               />
             </div>
             <div className="flex flex-1 items-center justify-center">
@@ -706,6 +720,7 @@ export function DeckEditorClient({
                 slideXml={currentSlideXml}
                 zoom={zoom}
                 forceModelRender={previewRevisionVersion !== null}
+                readOnly={!canEditDeck}
               />
             </div>
           </SidebarInset>
@@ -723,6 +738,11 @@ export function DeckEditorClient({
         open={isAiDialogOpen}
         onOpenChange={setIsAiDialogOpen}
         onConfirm={handleAiConfirm}
+      />
+      <ShareDialog
+        open={isShareDialogOpen}
+        onOpenChange={setIsShareDialogOpen}
+        deckId={deckId}
       />
     </div>
   );
@@ -758,6 +778,7 @@ function Toolbar({
   isRollingBack,
   isPreviewingRevision,
   onAskAi,
+  readOnly = false,
 }: {
   zoom: number;
   onZoomChange: (nextZoom: number) => void;
@@ -776,6 +797,7 @@ function Toolbar({
   isRollingBack: boolean;
   isPreviewingRevision: boolean;
   onAskAi: () => void;
+  readOnly?: boolean;
 }) {
   const pendingInsertion = useSlideEditorStore((state) => state.pendingInsertion);
   const setPendingInsertion = useSlideEditorStore((state) => state.setPendingInsertion);
@@ -819,18 +841,27 @@ function Toolbar({
 
       const isMeta = event.metaKey || event.ctrlKey;
       if (isMeta && !event.shiftKey && event.key.toLowerCase() === "z") {
+        if (readOnly) {
+          return;
+        }
         event.preventDefault();
         undo();
         return;
       }
 
       if ((isMeta && event.shiftKey && event.key.toLowerCase() === "z") || (isMeta && event.key.toLowerCase() === "y")) {
+        if (readOnly) {
+          return;
+        }
         event.preventDefault();
         redo();
         return;
       }
 
       if (isMeta && event.key.toLowerCase() === 'c') {
+        if (readOnly) {
+          return;
+        }
         event.preventDefault()
         copySelectedShape()
         toast.success('已复制形状')
@@ -838,6 +869,9 @@ function Toolbar({
       }
 
       if (isMeta && event.key.toLowerCase() === 'x') {
+        if (readOnly) {
+          return;
+        }
         event.preventDefault()
         cutSelectedShape()
         toast.success('已剪切形状')
@@ -845,6 +879,9 @@ function Toolbar({
       }
 
       if (isMeta && event.key.toLowerCase() === 'v') {
+        if (readOnly) {
+          return;
+        }
         event.preventDefault()
         pasteCopiedShape()
         toast.success('已粘贴形状')
@@ -852,6 +889,9 @@ function Toolbar({
       }
 
       if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (readOnly) {
+          return;
+        }
         event.preventDefault()
         deleteSelectedShape()
         toast.success('已删除形状')
@@ -869,6 +909,7 @@ function Toolbar({
     isPreviewMode,
     pasteCopiedShape,
     pendingInsertion,
+    readOnly,
     redo,
     setPendingInsertion,
     undo,
@@ -891,7 +932,8 @@ function Toolbar({
         <button
           type="button"
           onClick={onAskAi}
-          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200"
+          disabled={readOnly}
+          className="flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <span className="grid h-5 w-5 place-items-center rounded-full bg-slate-800 text-white">
             <Sparkles className="h-3 w-3" />
@@ -904,7 +946,7 @@ function Toolbar({
         <ToolbarMenu
           icon={<Type className="h-4 w-4" />}
           label="文本"
-          disabled={isPreviewMode}
+          disabled={isPreviewMode || readOnly}
           isActive={pendingInsertion?.type === "text"}
           items={TEXT_PRESET_OPTIONS.map((option) => {
             const previewSize = Math.max(12, Math.min(28, Math.round(option.fontSize * 0.72)));
@@ -936,7 +978,7 @@ function Toolbar({
         <ToolbarMenu
           icon={<Shapes className="h-4 w-4" />}
           label="图形"
-          disabled={isPreviewMode}
+          disabled={isPreviewMode || readOnly}
           isActive={pendingInsertion?.type === "shape"}
           items={[
             { key: "rect", label: "矩形", onClick: () => setPendingInsertion({ type: "shape", shapeType: "rect" }) },
@@ -946,7 +988,7 @@ function Toolbar({
           ]}
         />
         <TableInsertGridMenu
-          disabled={isPreviewMode}
+          disabled={isPreviewMode || readOnly}
           isActive={pendingInsertion?.type === "table"}
           onInsert={(rows, columns) => setPendingInsertion({ type: "table", rows, columns })}
         />
