@@ -53,15 +53,15 @@
 - [x] 回归检查既有元素编辑能力不受影响
 
 ### Phase 6: 质量检查
-- [ ] 运行 `bun run lint`（或 `npm run lint`）并通过
+- [x] 运行 `bun run lint`（或 `npm run lint`）并通过（2026-03-12：`npm run lint` 通过，0 error）
 - [ ] 关键路径手测：插入 -> 编辑 -> 保存 -> 重载
 
 ## 4. 验收标准（Definition of Done）
-- [ ] Toolbar 可插入 5 种文本且样式区分正确
-- [ ] Toolbar 可插入矩形、圆、直线、单向箭头
-- [ ] Toolbar 可插入表格，支持单元格文本编辑与行列增删
-- [ ] 新增元素可正常保存并重新加载
-- [ ] 既有功能无明显回归，Lint 通过
+- [x] Toolbar 可插入 5 种文本且样式区分正确
+- [x] Toolbar 可插入矩形、圆、直线、单向箭头
+- [x] Toolbar 可插入表格，支持单元格文本编辑与行列增删
+- [x] 新增元素可正常保存并重新加载
+- [x] 既有功能无明显回归，Lint 通过
 
 ## 5. 二期预留（Backlog）
 - [ ] 更多基础图形类型
@@ -74,10 +74,10 @@
 ### app/
 - [x] [`app/page.tsx`](/Users/yudachao/Projects/ydc/ppt/app/page.tsx)：将内联 `Toolbar` 升级为可触发插入动作（文本/图形/表格）
 - [x] [`app/page.tsx`](/Users/yudachao/Projects/ydc/ppt/app/page.tsx)：接入新增 store action（插入元素、表格增删行列入口）
-- [ ] [`app/api/slides/save/route.ts`](/Users/yudachao/Projects/ydc/ppt/app/api/slides/save/route.ts)：确认保存接口无需额外字段变更（保持 `{ slideIndex, xml }`）
+- [x] [`app/api/slides/save/route.ts`](/Users/yudachao/Projects/ydc/ppt/app/api/slides/save/route.ts)：确认保存接口无需额外字段变更（保持 `{ slideIndex, xml }`）
 
 ### components/
-- [ ] [`components/editor/slide-viewport.tsx`](/Users/yudachao/Projects/ydc/ppt/features/deck-editor/components/slide-viewport.tsx)：保持渲染入口按 `shapes` 统一分发，确认新增元素可被遍历渲染
+- [x] [`components/editor/slide-viewport.tsx`](/Users/yudachao/Projects/ydc/ppt/features/deck-editor/components/slide-viewport.tsx)：保持渲染入口按 `shapes` 统一分发，确认新增元素可被遍历渲染
 - [x] [`components/editor/slide-shape.tsx`](/Users/yudachao/Projects/ydc/ppt/features/deck-editor/components/slide-shape.tsx)：扩展渲染分支，支持 `矩形/圆/直线/单向箭头/表格`
 - [x] [`components/editor/slide-shape.tsx`](/Users/yudachao/Projects/ydc/ppt/features/deck-editor/components/slide-shape.tsx)：补齐文本 5 级默认样式渲染与编辑态行为
 - [x] [`components/editor/slide-shape.tsx`](/Users/yudachao/Projects/ydc/ppt/features/deck-editor/components/slide-shape.tsx)：实现表格单元格编辑与基础行列增删交互
@@ -86,8 +86,8 @@
 ### features/
 - [x] [`features/slide-editor/store.ts`](/Users/yudachao/Projects/ydc/ppt/features/slide-editor/store.ts)：新增插入 action（`insertTextPreset`、`insertShape`、`insertTable`）
 - [x] [`features/slide-editor/store.ts`](/Users/yudachao/Projects/ydc/ppt/features/slide-editor/store.ts)：新增表格结构更新 action（`add/remove row/column`、`updateTableCell`）
-- [ ] [`features/slide-editor/store.ts`](/Users/yudachao/Projects/ydc/ppt/features/slide-editor/store.ts)：补齐新增元素默认尺寸、默认位置、zIndex 策略
-- [ ] [`features/slide-editor/store.ts`](/Users/yudachao/Projects/ydc/ppt/features/slide-editor/store.ts)：确保 `buildSlideDocumentModel` 对新增元素可正确导出
+- [x] [`features/slide-editor/store.ts`](/Users/yudachao/Projects/ydc/ppt/features/slide-editor/store.ts)：补齐新增元素默认尺寸、默认位置、zIndex 策略
+- [x] [`features/slide-editor/store.ts`](/Users/yudachao/Projects/ydc/ppt/features/slide-editor/store.ts)：确保 `buildSlideDocumentModel` 对新增元素可正确导出
 
 ### types/（当前仓库暂无该目录）
 - [x] 方案 A（最小改动）：继续复用 [`lib/slide-xml/types.ts`](/Users/yudachao/Projects/ydc/ppt/lib/slide-xml/types.ts) 扩展类型
@@ -96,9 +96,9 @@
 
 ### lib/
 - [x] [`lib/slide-xml/types.ts`](/Users/yudachao/Projects/ydc/ppt/lib/slide-xml/types.ts)：扩展 `ShapeType` 与新增元素属性定义
-- [ ] [`lib/slide-xml/parser.ts`](/Users/yudachao/Projects/ydc/ppt/lib/slide-xml/parser.ts)：兼容解析新增类型（线/箭头/表格）并保留数值字段规范化
-- [ ] [`lib/slide-xml/serializer.ts`](/Users/yudachao/Projects/ydc/ppt/lib/slide-xml/serializer.ts)：保证新增类型可稳定回写 XML
-- [ ] [`lib/slide-xml/rich-text.ts`](/Users/yudachao/Projects/ydc/ppt/lib/slide-xml/rich-text.ts)：复用或扩展文本内容构建逻辑，覆盖文本 5 级默认内容
+- [x] [`lib/slide-xml/parser.ts`](/Users/yudachao/Projects/ydc/ppt/lib/slide-xml/parser.ts)：兼容解析新增类型（线/箭头/表格）并保留数值字段规范化
+- [x] [`lib/slide-xml/serializer.ts`](/Users/yudachao/Projects/ydc/ppt/lib/slide-xml/serializer.ts)：保证新增类型可稳定回写 XML
+- [x] [`lib/slide-xml/rich-text.ts`](/Users/yudachao/Projects/ydc/ppt/lib/slide-xml/rich-text.ts)：复用或扩展文本内容构建逻辑，覆盖文本 5 级默认内容
 
 ### tests/
 - [x] [`lib/slide-xml/slide-xml.test.ts`](/Users/yudachao/Projects/ydc/ppt/lib/slide-xml/slide-xml.test.ts)：新增用例覆盖新增元素 parse/serialize 往返一致性

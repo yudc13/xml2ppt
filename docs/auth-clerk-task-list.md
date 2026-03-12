@@ -64,7 +64,7 @@
 - [ ] 验证未授权请求返回预期状态码（401/redirect）
 
 ### Phase 7: 质量检查与验收
-- [ ] 执行 `bun run lint`（或 `npm run lint`）并通过
+- [x] 执行 `bun run lint`（或 `npm run lint`）并通过（2026-03-12：`npm run lint` 通过，0 error）
 - [ ] 关键流程手测：
 - [ ] 未登录访问受保护页 -> 跳转登录 -> 登录后回原页
 - [ ] 正常登录 -> 跳转 `/`
@@ -72,12 +72,12 @@
 - [ ] Clerk 用户创建/更新/删除后，本地 `users` 表同步正确
 
 ## 4. 验收标准（Definition of Done）
-- [ ] `/sign-in` 与 `/sign-up` 为公开路由，其余页面受保护
-- [ ] `app/api/**` 默认受保护，webhook 例外
+- [x] `/sign-in` 与 `/sign-up` 为公开路由，其余页面受保护
+- [x] `app/api/**` 默认受保护，webhook 例外
 - [ ] 仅可通过 Google/GitHub 登录
-- [ ] 登录后默认到 `/`，且支持回跳原目标页
-- [ ] 登录/注册 UI 为自定义且移动端可用
-- [ ] `users` 表存在并可通过 webhook 实时同步
+- [x] 登录后默认到 `/`，且支持回跳原目标页
+- [x] 登录/注册 UI 为自定义且移动端可用
+- [x] `users` 表存在并可通过 webhook 实时同步
 - [ ] Lint 通过且核心流程手测通过
 
 ## 5. 文件级执行清单（建议）

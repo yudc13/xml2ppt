@@ -1,5 +1,4 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import { auth } from '@clerk/nextjs/server'
 
 import { apiError, apiOk } from '@/lib/api/response'
 import { getAuthenticatedUser } from '@/lib/auth/user'
@@ -48,7 +47,7 @@ export async function POST(request: Request) {
 		}
 
 		const model = genAI.getGenerativeModel({
-			model: 'gemini-2.5-flash',
+			model: 'Gemma-3-2B',
 			generationConfig: {
 				responseMimeType: 'application/json',
 			},
