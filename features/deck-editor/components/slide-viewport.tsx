@@ -24,7 +24,6 @@ import {
   Trash2,
   Layers,
   LayoutGrid,
-  ChevronRight,
   ArrowUp,
   ArrowDown,
   ArrowUpToLine,
@@ -35,8 +34,10 @@ import {
   AlignStartVertical,
   AlignCenterVertical,
   AlignEndVertical,
+  MessageSquarePlus,
 } from "lucide-react";
 import { toast } from "sonner";
+import type { CommentEntity } from "@/features/deck-editor/types";
 
 const DEFAULT_SLIDE_INDEX = 0;
 const DEFAULT_ZOOM = 65;
@@ -50,12 +51,18 @@ export function SlideViewport({
   zoom = DEFAULT_ZOOM,
   forceModelRender = false,
   readOnly = false,
+  comments = [],
+  onShapeCommentClick,
+  onAddCommentFromContext,
 }: {
   slideIndex?: number;
   slideXml?: string;
   zoom?: number;
   forceModelRender?: boolean;
   readOnly?: boolean;
+  comments?: CommentEntity[];
+  onShapeCommentClick?: (shapeId: string) => void;
+  onAddCommentFromContext?: (shapeId: string) => void;
 }) {
   const model = useMemo(() => parseSlideXml(slideXml ?? ""), [slideXml]);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -102,6 +109,41 @@ export function SlideViewport({
   const viewportWidth = (BASE_VIEWPORT_WIDTH * safeZoom) / 100;
   const shouldUseStoreShapes = !forceModelRender && isHydrated && currentSlideIndex === slideIndex;
   const interactiveEnabled = shouldUseStoreShapes && !isPreviewMode && !pendingInsertion && !readOnly;
+  const commentsCountByShape = useMemo(() => {
+    const countMap = new Map<string, number>();
+    for (const comment of comments) {
+      if (!comment.shapeId) {
+        continue;
+      }
+      countMap.set(comment.shapeId, (countMap.get(comment.shapeId) ?? 0) + 1);
+    }
+    return countMap;
+  }, [comments]);
+
+  const renderedShapes = shouldUseStoreShapes
+    ? interactiveShapes.map((shape) => ({
+      id: shape.id,
+      topLeftX: shape.attributes.topLeftX,
+      topLeftY: shape.attributes.topLeftY,
+      width: shape.attributes.width,
+      height: shape.attributes.height,
+      node: (
+        <SlideShape
+          key={shape.id}
+          shape={shape}
+          viewportRef={viewportRef}
+          interactive={interactiveEnabled}
+        />
+      ),
+    }))
+    : model.shapes.map((shape) => ({
+      id: shape.attributes.id,
+      topLeftX: shape.attributes.topLeftX,
+      topLeftY: shape.attributes.topLeftY,
+      width: shape.attributes.width,
+      height: shape.attributes.height,
+      node: <SlideShape key={shape.attributes.id} shape={shape} />,
+    }));
 
   useEffect(() => {
     initializeSlide(slideIndex, model, slideXml ?? "");
@@ -192,18 +234,28 @@ export function SlideViewport({
                   }
                 }}
               >
-                {shouldUseStoreShapes
-                  ? interactiveShapes.map((shape) => (
-                    <SlideShape
-                      key={shape.id}
-                      shape={shape}
-                      viewportRef={viewportRef}
-                      interactive={interactiveEnabled}
-                    />
-                  ))
-                  : model.shapes.map((shape) => (
-                    <SlideShape key={shape.attributes.id} shape={shape} />
-                  ))}
+                {renderedShapes.map((shape) => shape.node)}
+                {renderedShapes.map((shape) => {
+                  const count = commentsCountByShape.get(shape.id) ?? 0;
+                  if (count <= 0) {
+                    return null;
+                  }
+                  return (
+                    <button
+                      key={`${shape.id}-comment-pin`}
+                      type="button"
+                      onClick={() => onShapeCommentClick?.(shape.id)}
+                      className="absolute z-20 grid h-5 min-w-5 place-items-center rounded-full bg-sky-600 px-1 text-[10px] font-semibold text-white shadow"
+                      style={{
+                        left: `${((shape.topLeftX + shape.width - 8) / 960) * 100}%`,
+                        top: `${((shape.topLeftY - 8) / 540) * 100}%`,
+                      }}
+                      title={`该形状有 ${count} 条评论`}
+                    >
+                      {count}
+                    </button>
+                  );
+                })}
                 {interactiveEnabled && snapGuides.vertical !== null ? (
                   <div
                     className="pointer-events-none absolute top-0 z-[10020] h-full w-px bg-sky-500/80"
@@ -284,6 +336,21 @@ export function SlideViewport({
               <ContextMenuShortcut className="text-[10px] font-medium text-slate-400">
                 {modifierKey}V
               </ContextMenuShortcut>
+            </ContextMenuItem>
+
+            <ContextMenuSeparator className="my-1.5 h-px bg-slate-100" />
+            <ContextMenuItem
+              className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-slate-700 outline-none transition-colors hover:bg-slate-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-40"
+              disabled={readOnly}
+              onClick={() => {
+                if (readOnly || !selectedShapeId) {
+                  return;
+                }
+                onAddCommentFromContext?.(selectedShapeId);
+              }}
+            >
+              <MessageSquarePlus className="h-4 w-4 text-slate-500 group-hover:text-sky-600" />
+              <span className="flex-1">添加评论</span>
             </ContextMenuItem>
 
             <ContextMenuSeparator className="my-1.5 h-px bg-slate-100" />

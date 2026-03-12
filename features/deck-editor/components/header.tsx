@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { UserButton } from "@clerk/nextjs";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, CircleAlert, Eye, EyeOff, History, Loader2, MonitorPlay, Save, Share2, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Eye, EyeOff, History, Loader2, MessageSquare, MonitorPlay, Save, Share2, X } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +20,7 @@ type HeaderProps = {
   onSave?: () => void;
   onOpenHistory?: () => void;
   onOpenShare?: () => void;
+  onOpenComments?: () => void;
   onTogglePreview?: () => void;
   onPlay?: () => void;
   onExportPdf?: () => void;
@@ -31,6 +32,7 @@ type HeaderProps = {
   isPreviewMode?: boolean;
   disableSave?: boolean;
   disableShare?: boolean;
+  disableComments?: boolean;
   disablePlay?: boolean;
   disableExport?: boolean;
 };
@@ -43,6 +45,7 @@ export function Header({
   onSave,
   onOpenHistory,
   onOpenShare,
+  onOpenComments,
   onTogglePreview,
   onPlay,
   onExportPdf,
@@ -54,6 +57,7 @@ export function Header({
   isPreviewMode = false,
   disableSave = false,
   disableShare = false,
+  disableComments = false,
   disablePlay = false,
   disableExport = false,
 }: HeaderProps) {
@@ -254,6 +258,15 @@ export function Header({
           >
             <Share2 className="h-3.5 w-3.5" />
             分享
+          </button>
+          <button
+            type="button"
+            onClick={onOpenComments}
+            disabled={disableComments}
+            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-3 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200 disabled:cursor-not-allowed disabled:text-slate-400"
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            评论
           </button>
           <button
             type="button"

@@ -568,6 +568,20 @@ export async function listCommentsBySlide(deckId: string, slideId: string): Prom
 		.orderBy(asc(comments.createdAt))
 }
 
+export async function listCommentCountsBySlide(
+	deckId: string
+): Promise<Array<{ slideId: string; count: number }>> {
+	const db = getDb()
+	return db
+		.select({
+			slideId: comments.slideId,
+			count: sql<number>`count(*)::int`,
+		})
+		.from(comments)
+		.where(and(eq(comments.deckId, deckId), isNull(comments.deletedAt)))
+		.groupBy(comments.slideId)
+}
+
 export async function createComment(
 	deckId: string,
 	authorId: string,

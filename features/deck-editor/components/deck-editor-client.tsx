@@ -2,8 +2,6 @@
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDownToLine,
-  ArrowUpToLine,
   ChevronDown,
   Palette,
   RotateCcw,
@@ -21,6 +19,7 @@ import { Sidebar } from "@/features/deck-editor/components/sidebar";
 import { SlideViewport } from "@/features/deck-editor/components/slide-viewport";
 import { AskAiDialog } from "@/features/deck-editor/components/ask-ai/ask-ai-dialog";
 import { ShareDialog } from "@/features/deck-editor/components/share-dialog";
+import { CommentsPanel } from "@/features/deck-editor/components/comments-panel";
 import { convertAiSlideToModels } from "@/lib/ai/adapter";
 import type { AiSlideDSL } from "@/lib/ai/types";
 import { parseSlideXml } from "@/lib/slide-xml/parser";
@@ -37,6 +36,7 @@ import {
   useSaveSlide,
   useUpdateDeckTitle,
 } from "@/features/deck-editor/hooks/use-deck-editor-api";
+import { useDeckCommentCounts, useSlideComments } from "@/features/deck-editor/hooks/use-comments-api";
 import { useSlideEditorStore } from "@/features/slide-editor/store";
 import { TEXT_PRESET_OPTIONS } from "@/features/slide-editor/text-preset-config";
 import type { DeckEntity, PersistedSlide, SaveStatus, SlideRevisionEntity } from "@/features/deck-editor/types";
@@ -88,7 +88,9 @@ export function DeckEditorClient({
   const currentSlideIndexInStore = useSlideEditorStore((state) => state.currentSlideIndex);
   const storeShapes = useSlideEditorStore((state) => state.shapes);
   const setPreviewMode = useSlideEditorStore((state) => state.setPreviewMode);
+  const selectShape = useSlideEditorStore((state) => state.selectShape);
   const isPreviewMode = useSlideEditorStore((state) => state.isPreviewMode);
+  const selectedShapeId = useSlideEditorStore((state) => state.selectedShapeId);
   const updateDeckTitle = useUpdateDeckTitle(deckId);
   const createSlide = useCreateSlide(deckId);
   const saveSlide = useSaveSlide();
@@ -115,13 +117,26 @@ export function DeckEditorClient({
   const [slideClipboardXml, setSlideClipboardXml] = useState<string | null>(null);
   const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [isCommentsPanelOpen, setIsCommentsPanelOpen] = useState(false);
+  const [commentShapeFilter, setCommentShapeFilter] = useState<string | null>(null);
   const isSlideOperationPending = createSlide.isPending || deleteSlideHook.isPending || getSlides.isPending;
   const saveStatusTimeoutRef = useRef<number | null>(null);
   const canEditDeck = initialDeck.accessRole === "owner" || initialDeck.accessRole === "editor";
-
-  console.log("initialDeck", initialDeck);
+  const canCommentDeck =
+    initialDeck.accessRole === "owner" ||
+    initialDeck.accessRole === "editor" ||
+    initialDeck.accessRole === "commenter";
 
   const activeSlide = slides[activeSlideIndex] ?? null;
+  const commentsOnActiveSlide = useSlideComments(deckId, activeSlide?.id);
+  const commentsSummary = useDeckCommentCounts(deckId);
+  const commentCountBySlideId = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const item of commentsSummary.data ?? []) {
+      map[item.slideId] = item.count;
+    }
+    return map;
+  }, [commentsSummary.data]);
   const currentSlideXml = previewRevisionXml ?? activeSlide?.xmlContent;
   const slideNumbers = useMemo(() => slides.map((_, index) => index + 1), [slides]);
   const shapeMutationSignal = useMemo(
@@ -389,6 +404,8 @@ export function DeckEditorClient({
       resetRevisionState();
       setIsHistoryOpen(false);
       setActiveSlideIndex(nextIndex);
+      setCommentShapeFilter(null);
+      selectShape(null);
     })();
   };
 
@@ -540,6 +557,17 @@ export function DeckEditorClient({
     void persistActiveSlide({ showStatus: true });
   };
 
+  const handleOpenComments = () => {
+    setIsCommentsPanelOpen(true);
+    setCommentShapeFilter(selectedShapeId);
+  };
+
+  const handleFocusCommentShape = (shapeId: string | null) => {
+    setCommentShapeFilter(shapeId);
+    selectShape(shapeId);
+    setIsCommentsPanelOpen(true);
+  };
+
   const handlePlay = () => {
     void (async () => {
       const ok = await ensureExportableState();
@@ -653,6 +681,7 @@ export function DeckEditorClient({
         onSave={handleManualSave}
         onOpenHistory={handleOpenHistory}
         onOpenShare={canEditDeck ? () => setIsShareDialogOpen(true) : undefined}
+        onOpenComments={activeSlide ? handleOpenComments : undefined}
         onTogglePreview={() => setPreviewMode(!isPreviewMode)}
         onPlay={handlePlay}
         onExportPdf={() => handleExport("pdf")}
@@ -664,6 +693,7 @@ export function DeckEditorClient({
         isPreviewMode={isPreviewMode}
         disableSave={previewRevisionVersion !== null || !canEditDeck}
         disableShare={!canEditDeck}
+        disableComments={!activeSlide}
         disablePlay={previewRevisionVersion !== null}
         disableExport={previewRevisionVersion !== null}
       />
@@ -674,6 +704,7 @@ export function DeckEditorClient({
             slides={slideNumbers}
             slideIdList={slides.map((slide) => slide.id)}
             slideXmlList={slides.map((slide) => slide.xmlContent)}
+            commentCountBySlideId={commentCountBySlideId}
             activeSlide={activeSlideIndex + 1}
             activeSlideId={activeSlide?.id}
             activeSlideRenderXml={currentSlideXml}
@@ -721,6 +752,13 @@ export function DeckEditorClient({
                 zoom={zoom}
                 forceModelRender={previewRevisionVersion !== null}
                 readOnly={!canEditDeck}
+                comments={commentsOnActiveSlide.data ?? []}
+                onShapeCommentClick={(shapeId) => {
+                  handleFocusCommentShape(shapeId);
+                }}
+                onAddCommentFromContext={(shapeId) => {
+                  handleFocusCommentShape(shapeId);
+                }}
               />
             </div>
           </SidebarInset>
@@ -743,6 +781,16 @@ export function DeckEditorClient({
         open={isShareDialogOpen}
         onOpenChange={setIsShareDialogOpen}
         deckId={deckId}
+      />
+      <CommentsPanel
+        open={isCommentsPanelOpen}
+        onOpenChange={setIsCommentsPanelOpen}
+        deckId={deckId}
+        slideId={activeSlide?.id}
+        canComment={canCommentDeck}
+        canManage={canEditDeck}
+        activeShapeId={commentShapeFilter}
+        onSelectShape={handleFocusCommentShape}
       />
     </div>
   );

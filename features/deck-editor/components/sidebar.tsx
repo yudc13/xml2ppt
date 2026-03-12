@@ -37,6 +37,7 @@ interface SidebarProps {
   slides: number[];
   slideIdList: string[];
   slideXmlList: string[];
+  commentCountBySlideId?: Record<string, number>;
   activeSlide?: number;
   activeSlideId?: string;
   activeSlideRenderXml?: string;
@@ -57,6 +58,7 @@ export function Sidebar({
   slides,
   slideIdList,
   slideXmlList,
+  commentCountBySlideId = {},
   activeSlide = 1,
   activeSlideId,
   activeSlideRenderXml,
@@ -109,6 +111,7 @@ export function Sidebar({
                 number={slide}
                 slideIndex={index}
                 slideId={slideIdList[index]}
+                commentCount={commentCountBySlideId[slideIdList[index]] ?? 0}
                 slideXml={slideXmlList[index]}
                 isActive={slide === activeSlide}
                 activeSlideId={activeSlideId}
@@ -179,6 +182,7 @@ function ExpandedSlideThumbnail({
   forceActiveSlideModelRender,
   onSelect,
   onContextMenu,
+  commentCount = 0,
 }: {
   number: number;
   slideIndex: number;
@@ -190,6 +194,7 @@ function ExpandedSlideThumbnail({
   forceActiveSlideModelRender: boolean;
   onSelect?: (slideNumber: number) => void;
   onContextMenu?: () => void;
+  commentCount?: number;
 }) {
   const isHydrated = useSyncExternalStore(
     () => () => { },
@@ -255,12 +260,17 @@ function ExpandedSlideThumbnail({
           }}
           aria-pressed={isActive}
           className={cn(
-            "h-[108px] w-full cursor-pointer rounded-xl border p-2 text-left transition-all duration-200",
+            "relative h-[108px] w-full cursor-pointer rounded-xl border p-2 text-left transition-all duration-200",
             isActive
               ? "border-blue-500 bg-white ring-2 ring-blue-500/10 shadow-sm"
               : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"
           )}
         >
+          {commentCount > 0 ? (
+            <span className="absolute right-4 top-3 z-10 rounded-full bg-sky-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow">
+              {commentCount}
+            </span>
+          ) : null}
           <div className="flex h-full items-center justify-center overflow-hidden rounded-md border border-slate-100/50 bg-slate-50 p-1">
             <div className="mx-auto h-auto w-full max-h-full max-w-full [container-type:inline-size] aspect-[16/9]">
               <div className="relative h-full w-full overflow-hidden rounded-[4px] bg-white text-[calc(var(--slide-unit)*16)] leading-normal [--slide-unit:calc(100cqw/960)]">
@@ -295,6 +305,7 @@ function SlideThumbnail({
   onDelete,
   onDuplicate,
   onCreateNew,
+  commentCount = 0,
   canPaste,
   readOnly = false,
 }: {
@@ -313,6 +324,7 @@ function SlideThumbnail({
   onDelete?: () => void;
   onDuplicate?: () => void;
   onCreateNew?: () => void;
+  commentCount?: number;
   canPaste?: boolean;
   readOnly?: boolean;
 }) {
@@ -346,6 +358,7 @@ function SlideThumbnail({
           forceActiveSlideModelRender={forceActiveSlideModelRender}
           onSelect={onSelect}
           onContextMenu={handleActivateByContextMenu}
+          commentCount={commentCount}
         />
       </div>
 
