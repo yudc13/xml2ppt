@@ -74,10 +74,16 @@ export function TemplateListClient() {
       <section className="mx-auto max-w-6xl rounded-3xl border border-slate-200/90 bg-white/95 p-6 shadow-[0_10px_34px_rgba(15,23,42,0.06)]">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200/80 pb-5">
           <div className="min-w-[220px]">
-            <Link href="/" className="inline-flex items-center gap-1 text-sm font-medium text-sky-700 hover:text-sky-800">
-              <ArrowLeft className="h-4 w-4" />
-              返回首页
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link href="/" className="inline-flex items-center gap-1 text-sm font-medium text-sky-700 hover:text-sky-800">
+                <ArrowLeft className="h-4 w-4" />
+                返回首页
+              </Link>
+              <span className="text-slate-300">|</span>
+              <Link href="/me" className="inline-flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900">
+                个人中心
+              </Link>
+            </div>
             <h1 className="mt-3 inline-flex items-center gap-2 text-2xl font-semibold text-slate-900">
               <LayoutTemplate className="h-6 w-6 text-sky-600" />
               模板中心
