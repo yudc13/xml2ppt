@@ -8,6 +8,7 @@ import {
 	deckMembers,
 	decks,
 	deckShareLinks,
+	pptTemplates,
 	slideRevisions,
 	slides,
 	users,
@@ -15,6 +16,7 @@ import {
 	type Deck,
 	type DeckMember,
 	type DeckShareLink,
+	type PptTemplate,
 	type Slide,
 	type SlideRevision,
 	type User,
@@ -23,6 +25,20 @@ import { createBlankSlideXml } from '@/lib/slides/default-xml'
 
 export type DeckAccessRole = 'owner' | 'editor' | 'commenter' | 'viewer'
 export type SharePermission = 'viewer' | 'commenter' | 'editor'
+export type TemplateSnapshot = {
+	slides: Array<{ xmlContent: string; position?: number }>
+}
+export type PptTemplateListItem = Pick<
+	PptTemplate,
+	'id' | 'title' | 'slug' | 'coverUrl' | 'sceneTag' | 'lang' | 'ratio' | 'isFree' | 'sortOrder'
+>
+export type PptTemplatePreview = {
+	id: string
+	title: string
+	sceneTag: string
+	ratio: string
+	slides: Array<{ position: number; xmlContent: string }>
+}
 
 const ROLE_WEIGHT: Record<DeckAccessRole, number> = {
 	viewer: 1,
@@ -48,6 +64,52 @@ function permissionToRole(permission: SharePermission): Exclude<DeckAccessRole, 
 		return 'commenter'
 	}
 	return 'viewer'
+}
+
+function parseTemplateSnapshot(raw: unknown): TemplateSnapshot | null {
+	if (!raw || typeof raw !== 'object' || !('slides' in raw)) {
+		return null
+	}
+
+	const slidesRaw = (raw as { slides?: unknown }).slides
+	if (!Array.isArray(slidesRaw)) {
+		return null
+	}
+
+	const slidesSnapshot: TemplateSnapshot['slides'] = []
+	for (const slide of slidesRaw) {
+		if (!slide || typeof slide !== 'object') {
+			return null
+		}
+
+		const xmlContent = (slide as { xmlContent?: unknown }).xmlContent
+		const position = (slide as { position?: unknown }).position
+		if (typeof xmlContent !== 'string' || xmlContent.length === 0) {
+			return null
+		}
+
+		if (position !== undefined && (!Number.isInteger(position) || position < 1)) {
+			return null
+		}
+
+		slidesSnapshot.push({
+			xmlContent,
+			position: typeof position === 'number' ? position : undefined,
+		})
+	}
+
+	if (slidesSnapshot.length === 0) {
+		return null
+	}
+
+	return {
+		slides: slidesSnapshot,
+	}
+}
+
+function getDeckTitleWithDate(title: string): string {
+	const date = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' })
+	return `${title} ${date}`
 }
 
 export async function getDeckAccessRole(deckId: string, userId: string): Promise<DeckAccessRole | null> {
@@ -119,6 +181,191 @@ export async function createDeck(title: string, userId: string): Promise<Deck> {
 	const db = getDb()
 	const [created] = await db.insert(decks).values({ title, userId }).returning()
 	return created
+}
+
+export async function listHomePptTemplates(limit = 8): Promise<PptTemplateListItem[]> {
+	const db = getDb()
+	const safeLimit = Math.max(1, Math.min(20, limit))
+	return db
+		.select({
+			id: pptTemplates.id,
+			title: pptTemplates.title,
+			slug: pptTemplates.slug,
+			coverUrl: pptTemplates.coverUrl,
+			sceneTag: pptTemplates.sceneTag,
+			lang: pptTemplates.lang,
+			ratio: pptTemplates.ratio,
+			isFree: pptTemplates.isFree,
+			sortOrder: pptTemplates.sortOrder,
+		})
+		.from(pptTemplates)
+		.where(and(eq(pptTemplates.status, 'active'), eq(pptTemplates.lang, 'zh-CN')))
+		.orderBy(asc(pptTemplates.sortOrder), desc(pptTemplates.createdAt))
+		.limit(safeLimit)
+}
+
+export async function listPptTemplates(params: {
+	sceneTag?: string
+	page?: number
+	pageSize?: number
+}): Promise<{ templates: PptTemplateListItem[]; total: number }> {
+	const db = getDb()
+	const page = params.page && params.page > 0 ? params.page : 1
+	const pageSize = params.pageSize && params.pageSize > 0 ? Math.min(params.pageSize, 50) : 24
+	const offset = (page - 1) * pageSize
+	const conditions = [eq(pptTemplates.status, 'active'), eq(pptTemplates.lang, 'zh-CN')]
+	if (params.sceneTag) {
+		conditions.push(eq(pptTemplates.sceneTag, params.sceneTag))
+	}
+
+	const templates = await db
+		.select({
+			id: pptTemplates.id,
+			title: pptTemplates.title,
+			slug: pptTemplates.slug,
+			coverUrl: pptTemplates.coverUrl,
+			sceneTag: pptTemplates.sceneTag,
+			lang: pptTemplates.lang,
+			ratio: pptTemplates.ratio,
+			isFree: pptTemplates.isFree,
+			sortOrder: pptTemplates.sortOrder,
+		})
+		.from(pptTemplates)
+		.where(and(...conditions))
+		.orderBy(asc(pptTemplates.sortOrder), desc(pptTemplates.createdAt))
+		.limit(pageSize)
+		.offset(offset)
+
+	const [countRow] = await db
+		.select({ total: sql<number>`count(*)::int` })
+		.from(pptTemplates)
+		.where(and(...conditions))
+
+	return {
+		templates,
+		total: countRow?.total ?? 0,
+	}
+}
+
+export async function listPptTemplateScenes(): Promise<string[]> {
+	const db = getDb()
+	const rows = await db
+		.selectDistinct({ sceneTag: pptTemplates.sceneTag })
+		.from(pptTemplates)
+		.where(and(eq(pptTemplates.status, 'active'), eq(pptTemplates.lang, 'zh-CN')))
+		.orderBy(asc(pptTemplates.sceneTag))
+
+	return rows.map((row) => row.sceneTag)
+}
+
+export async function getPptTemplatePreview(templateId: string): Promise<PptTemplatePreview | null> {
+	const db = getDb()
+	const [template] = await db
+		.select({
+			id: pptTemplates.id,
+			title: pptTemplates.title,
+			sceneTag: pptTemplates.sceneTag,
+			ratio: pptTemplates.ratio,
+			templateData: pptTemplates.templateData,
+		})
+		.from(pptTemplates)
+		.where(
+			and(
+				eq(pptTemplates.id, templateId),
+				eq(pptTemplates.status, 'active'),
+				eq(pptTemplates.lang, 'zh-CN')
+			)
+		)
+		.limit(1)
+
+	if (!template) {
+		return null
+	}
+
+	const snapshot = parseTemplateSnapshot(template.templateData)
+	if (!snapshot) {
+		return null
+	}
+
+	const slides = snapshot.slides
+		.map((slide, index) => ({
+			position: slide.position ?? index + 1,
+			xmlContent: slide.xmlContent,
+		}))
+		.sort((a, b) => a.position - b.position)
+
+	return {
+		id: template.id,
+		title: template.title,
+		sceneTag: template.sceneTag,
+		ratio: template.ratio,
+		slides,
+	}
+}
+
+export async function createDeckFromTemplate(
+	templateId: string,
+	userId: string
+): Promise<{ deck: Deck } | null> {
+	const db = getDb()
+	return db.transaction(async (tx) => {
+		const [template] = await tx
+			.select()
+			.from(pptTemplates)
+			.where(
+				and(
+					eq(pptTemplates.id, templateId),
+					eq(pptTemplates.status, 'active'),
+					eq(pptTemplates.lang, 'zh-CN')
+				)
+			)
+			.limit(1)
+
+		if (!template) {
+			return null
+		}
+
+		const snapshot = parseTemplateSnapshot(template.templateData)
+		if (!snapshot) {
+			return null
+		}
+
+		const [deck] = await tx
+			.insert(decks)
+			.values({
+				title: getDeckTitleWithDate(template.title),
+				userId,
+			})
+			.returning()
+
+		const sortedSlides = [...snapshot.slides].sort((a, b) => {
+			const left = a.position ?? Number.MAX_SAFE_INTEGER
+			const right = b.position ?? Number.MAX_SAFE_INTEGER
+			return left - right
+		})
+
+		for (let index = 0; index < sortedSlides.length; index += 1) {
+			const slideSnapshot = sortedSlides[index]
+			const [slide] = await tx
+				.insert(slides)
+				.values({
+					deckId: deck.id,
+					position: index + 1,
+					xmlContent: slideSnapshot.xmlContent,
+				})
+				.returning()
+
+			await tx.insert(slideRevisions).values({
+				slideId: slide.id,
+				version: slide.version,
+				xmlContent: slide.xmlContent,
+				createdBy: userId,
+				reason: 'create',
+			})
+		}
+
+		return { deck }
+	})
 }
 
 export async function listDecks(userId: string): Promise<Deck[]> {

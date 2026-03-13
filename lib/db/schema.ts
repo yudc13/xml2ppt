@@ -1,8 +1,10 @@
 import {
 	type AnyPgColumn,
 	bigint,
+	boolean,
 	index,
 	integer,
+	jsonb,
 	pgTable,
 	text,
 	timestamp,
@@ -160,6 +162,30 @@ export const comments = pgTable(
 	})
 )
 
+export const pptTemplates = pgTable(
+	'ppt_template',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		title: text('title').notNull(),
+		slug: text('slug').notNull(),
+		coverUrl: text('cover_url'),
+		sceneTag: text('scene_tag').notNull(),
+		lang: text('lang').notNull().default('zh-CN'),
+		ratio: text('ratio').notNull().default('16:9'),
+		isFree: boolean('is_free').notNull().default(true),
+		status: text('status').notNull().default('active'),
+		sortOrder: integer('sort_order').notNull().default(0),
+		templateData: jsonb('template_data').notNull(),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table) => ({
+		slugUnique: uniqueIndex('ppt_template_slug_unique').on(table.slug),
+		statusSortIdx: index('idx_ppt_template_status_sort').on(table.status, table.sortOrder),
+		sceneTagIdx: index('idx_ppt_template_scene_tag').on(table.sceneTag),
+	})
+)
+
 export type Deck = typeof decks.$inferSelect
 export type NewDeck = typeof decks.$inferInsert
 export type Slide = typeof slides.$inferSelect
@@ -174,3 +200,5 @@ export type DeckShareLink = typeof deckShareLinks.$inferSelect
 export type NewDeckShareLink = typeof deckShareLinks.$inferInsert
 export type Comment = typeof comments.$inferSelect
 export type NewComment = typeof comments.$inferInsert
+export type PptTemplate = typeof pptTemplates.$inferSelect
+export type NewPptTemplate = typeof pptTemplates.$inferInsert
