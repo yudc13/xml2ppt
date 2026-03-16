@@ -21,6 +21,7 @@ import { SlideViewport } from "@/features/deck-editor/components/slide-viewport"
 import { AskAiDialog } from "@/features/deck-editor/components/ask-ai/ask-ai-dialog";
 import { ShareDialog } from "@/features/deck-editor/components/share-dialog";
 import { CommentsPanel } from "@/features/deck-editor/components/comments-panel";
+import { VisualDiffView } from "@/features/deck-editor/components/visual-diff-view";
 import { convertAiSlideToModels } from "@/lib/ai/adapter";
 import type { AiSlideDSL } from "@/lib/ai/types";
 import { parseSlideXml } from "@/lib/slide-xml/parser";
@@ -373,7 +374,7 @@ export function DeckEditorClient({
 
   const handleLoadRevisionDiff = async (version: number) => {
     if (!activeSlide || activeSlide.version === version || loadingDiffVersion === version) {
-      return;
+      return false;
     }
 
     setDiffErrorByVersion((prev) => {
@@ -393,12 +394,14 @@ export function DeckEditorClient({
         ...prev,
         [version]: diff,
       }));
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "加载版本对比失败";
       setDiffErrorByVersion((prev) => ({
         ...prev,
         [version]: message,
       }));
+      return false;
     } finally {
       setLoadingDiffVersion((current) => (current === version ? null : current));
     }
@@ -798,6 +801,7 @@ export function DeckEditorClient({
                 isPreviewingRevision={previewRevisionVersion !== null}
                 onAskAi={() => setIsAiDialogOpen(true)}
                 readOnly={!canEditDeck}
+                activeSlideXml={activeSlide?.xmlContent ?? null}
               />
             </div>
             <div className="flex flex-1 items-center justify-center">
@@ -886,6 +890,7 @@ function Toolbar({
   isPreviewingRevision,
   onAskAi,
   readOnly = false,
+  activeSlideXml,
 }: {
   zoom: number;
   onZoomChange: (nextZoom: number) => void;
@@ -904,11 +909,12 @@ function Toolbar({
   activeVersion: number | null;
   onPreviewRevision: (version: number) => void;
   onRollbackRevision: (version: number) => void;
-  onLoadRevisionDiff: (version: number) => void;
+  onLoadRevisionDiff: (version: number) => Promise<boolean>;
   isRollingBack: boolean;
   isPreviewingRevision: boolean;
   onAskAi: () => void;
   readOnly?: boolean;
+  activeSlideXml: string | null;
 }) {
   const pendingInsertion = useSlideEditorStore((state) => state.pendingInsertion);
   const setPendingInsertion = useSlideEditorStore((state) => state.setPendingInsertion);
@@ -919,6 +925,7 @@ function Toolbar({
   const deleteSelectedShape = useSlideEditorStore((state) => state.deleteSelectedShape);
   const undo = useSlideEditorStore((state) => state.undo);
   const redo = useSlideEditorStore((state) => state.redo);
+  const [visualDiffVersion, setVisualDiffVersion] = useState<number | null>(null);
 
   const canZoomOut = zoom > MIN_ZOOM;
   const canZoomIn = zoom < MAX_ZOOM;
@@ -1134,7 +1141,15 @@ function Toolbar({
           <ZoomIn className="h-4 w-4" />
         </button>
       </div>
-      <Sheet open={isHistoryOpen} onOpenChange={onHistoryOpenChange}>
+      <Sheet
+        open={isHistoryOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setVisualDiffVersion(null);
+          }
+          onHistoryOpenChange(open);
+        }}
+      >
         <SheetContent side="right" className="w-[420px] p-0 sm:max-w-[420px]">
           <SheetHeader className="border-b border-slate-200 bg-white p-4">
             <SheetTitle>历史版本</SheetTitle>
@@ -1169,6 +1184,9 @@ function Toolbar({
                   const diffResult = diffByVersion[revision.version];
                   const diffError = diffErrorByVersion[revision.version];
                   const isLoadingDiff = loadingDiffVersion === revision.version;
+                  const isVisualOpen = visualDiffVersion === revision.version;
+                  const currentRevisionXml =
+                    revisions.find((item) => item.version === activeVersion)?.xmlContent ?? activeSlideXml;
 
                   return (
                     <div
@@ -1212,6 +1230,30 @@ function Toolbar({
                           {isLoadingDiff ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                           对比当前
                         </button>
+                        <button
+                          type="button"
+                          disabled={isCurrent || isLoadingDiff}
+                          onClick={() => {
+                            void (async () => {
+                              if (isVisualOpen) {
+                                setVisualDiffVersion(null);
+                                return;
+                              }
+
+                              if (!diffResult) {
+                                const ok = await onLoadRevisionDiff(revision.version);
+                                if (!ok) {
+                                  return;
+                                }
+                              }
+
+                              setVisualDiffVersion(revision.version);
+                            })();
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100/70 disabled:cursor-not-allowed disabled:text-slate-400"
+                        >
+                          {isVisualOpen ? "关闭可视化" : "可视化"}
+                        </button>
                       </div>
                       {diffError ? <div className="mt-2 text-xs text-rose-600">{diffError}</div> : null}
                       {diffResult ? (
@@ -1241,6 +1283,13 @@ function Toolbar({
                           )}
                         </div>
                       ) : null}
+                      {isVisualOpen && diffResult && currentRevisionXml ? (
+                        <VisualDiffView
+                          diff={diffResult}
+                          fromXml={revision.xmlContent}
+                          toXml={currentRevisionXml}
+                        />
+                      ) : null}
                     </div>
                   );
                 })
@@ -1250,7 +1299,10 @@ function Toolbar({
           <SheetFooter className="border-t border-slate-200 bg-white p-4">
             <button
               type="button"
-              onClick={() => onHistoryOpenChange(false)}
+              onClick={() => {
+                setVisualDiffVersion(null);
+                onHistoryOpenChange(false);
+              }}
               className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100/70"
             >
               关闭
