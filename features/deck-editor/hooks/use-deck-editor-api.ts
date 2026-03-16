@@ -3,7 +3,12 @@
 import { useMutation } from '@tanstack/react-query'
 
 import { ApiRequestError, requestJson } from '@/features/shared/api/request-json'
-import type { DeckEntity, PersistedSlide, SlideRevisionEntity } from '@/features/deck-editor/types'
+import type {
+	DeckEntity,
+	PersistedSlide,
+	SlideDiffResult,
+	SlideRevisionEntity,
+} from '@/features/deck-editor/types'
 
 export { ApiRequestError }
 
@@ -137,6 +142,18 @@ export function useRollbackSlide() {
 			)
 
 			return response.slide
+		},
+	})
+}
+
+export function useGetSlideDiff() {
+	return useMutation({
+		mutationFn: async (input: { slideId: string; fromVersion: number; toVersion: number }) => {
+			const response = await requestJson<{ ok: true; diff: SlideDiffResult }>(
+				`/api/slides/${input.slideId}/diff?from=${input.fromVersion}&to=${input.toVersion}`
+			)
+
+			return response.diff
 		},
 	})
 }

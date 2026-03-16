@@ -8,6 +8,7 @@ import {
   Shapes,
   Sparkles,
   Table2,
+  Loader2,
   Type,
   ZoomIn,
   ZoomOut,
@@ -30,6 +31,7 @@ import {
   useCreateSlide,
   useDeleteSlide,
   useGetRevision,
+  useGetSlideDiff,
   useGetSlides,
   useLoadRevisions,
   useRollbackSlide,
@@ -39,7 +41,13 @@ import {
 import { useDeckCommentCounts, useSlideComments } from "@/features/deck-editor/hooks/use-comments-api";
 import { useSlideEditorStore } from "@/features/slide-editor/store";
 import { TEXT_PRESET_OPTIONS } from "@/features/slide-editor/text-preset-config";
-import type { DeckEntity, PersistedSlide, SaveStatus, SlideRevisionEntity } from "@/features/deck-editor/types";
+import type {
+  DeckEntity,
+  PersistedSlide,
+  SaveStatus,
+  SlideDiffResult,
+  SlideRevisionEntity,
+} from "@/features/deck-editor/types";
 import { exportSlidesToPdf } from "@/features/deck-editor/lib/export/export-pdf";
 import { exportSlidesToPptx } from "@/features/deck-editor/lib/export/export-pptx";
 import {
@@ -97,6 +105,7 @@ export function DeckEditorClient({
   const loadRevisions = useLoadRevisions();
   const getRevision = useGetRevision();
   const rollbackSlide = useRollbackSlide();
+  const getSlideDiff = useGetSlideDiff();
   const getSlides = useGetSlides(deckId);
   const deleteSlideHook = useDeleteSlide();
 
@@ -109,6 +118,9 @@ export function DeckEditorClient({
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [revisions, setRevisions] = useState<SlideRevisionEntity[]>([]);
   const [revisionError, setRevisionError] = useState<string | null>(null);
+  const [diffByVersion, setDiffByVersion] = useState<Record<number, SlideDiffResult>>({});
+  const [diffErrorByVersion, setDiffErrorByVersion] = useState<Record<number, string>>({});
+  const [loadingDiffVersion, setLoadingDiffVersion] = useState<number | null>(null);
   const [previewRevisionVersion, setPreviewRevisionVersion] = useState<number | null>(null);
   const [previewRevisionXml, setPreviewRevisionXml] = useState<string | null>(null);
   const [isPlayerOpen, setIsPlayerOpen] = useState(false);
@@ -167,6 +179,9 @@ export function DeckEditorClient({
     setPreviewRevisionXml(null);
     setRevisions([]);
     setRevisionError(null);
+    setDiffByVersion({});
+    setDiffErrorByVersion({});
+    setLoadingDiffVersion(null);
   };
 
   const isDirty = useMemo(() => {
@@ -310,6 +325,9 @@ export function DeckEditorClient({
     }
 
     setRevisionError(null);
+    setDiffByVersion({});
+    setDiffErrorByVersion({});
+    setLoadingDiffVersion(null);
     try {
       const nextRevisions = await loadRevisions.mutateAsync(activeSlide.id);
       setRevisions(nextRevisions);
@@ -350,6 +368,39 @@ export function DeckEditorClient({
     } catch (error) {
       const message = error instanceof Error ? error.message : "加载历史版本内容失败";
       setRevisionError(message);
+    }
+  };
+
+  const handleLoadRevisionDiff = async (version: number) => {
+    if (!activeSlide || activeSlide.version === version || loadingDiffVersion === version) {
+      return;
+    }
+
+    setDiffErrorByVersion((prev) => {
+      const next = { ...prev };
+      delete next[version];
+      return next;
+    });
+    setLoadingDiffVersion(version);
+
+    try {
+      const diff = await getSlideDiff.mutateAsync({
+        slideId: activeSlide.id,
+        fromVersion: version,
+        toVersion: activeSlide.version,
+      });
+      setDiffByVersion((prev) => ({
+        ...prev,
+        [version]: diff,
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "加载版本对比失败";
+      setDiffErrorByVersion((prev) => ({
+        ...prev,
+        [version]: message,
+      }));
+    } finally {
+      setLoadingDiffVersion((current) => (current === version ? null : current));
     }
   };
 
@@ -735,10 +786,14 @@ export function DeckEditorClient({
                 revisions={revisions}
                 isLoadingRevisions={loadRevisions.isPending}
                 revisionError={revisionError}
+                diffByVersion={diffByVersion}
+                diffErrorByVersion={diffErrorByVersion}
+                loadingDiffVersion={loadingDiffVersion}
                 previewRevisionVersion={previewRevisionVersion}
                 activeVersion={activeSlide?.version ?? null}
                 onPreviewRevision={handlePreviewRevision}
                 onRollbackRevision={handleRollbackRevision}
+                onLoadRevisionDiff={handleLoadRevisionDiff}
                 isRollingBack={rollbackSlide.isPending}
                 isPreviewingRevision={previewRevisionVersion !== null}
                 onAskAi={() => setIsAiDialogOpen(true)}
@@ -819,10 +874,14 @@ function Toolbar({
   revisions,
   isLoadingRevisions,
   revisionError,
+  diffByVersion,
+  diffErrorByVersion,
+  loadingDiffVersion,
   previewRevisionVersion,
   activeVersion,
   onPreviewRevision,
   onRollbackRevision,
+  onLoadRevisionDiff,
   isRollingBack,
   isPreviewingRevision,
   onAskAi,
@@ -838,10 +897,14 @@ function Toolbar({
   revisions: SlideRevisionEntity[];
   isLoadingRevisions: boolean;
   revisionError: string | null;
+  diffByVersion: Record<number, SlideDiffResult>;
+  diffErrorByVersion: Record<number, string>;
+  loadingDiffVersion: number | null;
   previewRevisionVersion: number | null;
   activeVersion: number | null;
   onPreviewRevision: (version: number) => void;
   onRollbackRevision: (version: number) => void;
+  onLoadRevisionDiff: (version: number) => void;
   isRollingBack: boolean;
   isPreviewingRevision: boolean;
   onAskAi: () => void;
@@ -1103,6 +1166,9 @@ function Toolbar({
                 revisions.map((revision) => {
                   const isCurrent = revision.version === activeVersion;
                   const isPreview = revision.version === previewRevisionVersion;
+                  const diffResult = diffByVersion[revision.version];
+                  const diffError = diffErrorByVersion[revision.version];
+                  const isLoadingDiff = loadingDiffVersion === revision.version;
 
                   return (
                     <div
@@ -1137,7 +1203,44 @@ function Toolbar({
                           <RotateCcw className="h-3.5 w-3.5" />
                           回滚
                         </button>
+                        <button
+                          type="button"
+                          disabled={isCurrent || isLoadingDiff}
+                          onClick={() => onLoadRevisionDiff(revision.version)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100/70 disabled:cursor-not-allowed disabled:text-slate-400"
+                        >
+                          {isLoadingDiff ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                          对比当前
+                        </button>
                       </div>
+                      {diffError ? <div className="mt-2 text-xs text-rose-600">{diffError}</div> : null}
+                      {diffResult ? (
+                        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/70 p-2.5">
+                          <div className="mb-1.5 text-[11px] font-medium text-slate-600">
+                            差异统计：+{diffResult.summary.added} / -{diffResult.summary.removed} / 布局
+                            {diffResult.summary.movedResized} / 文本{diffResult.summary.textChanged}
+                          </div>
+                          {diffResult.changes.length === 0 ? (
+                            <div className="text-[11px] text-slate-500">与当前版本无差异</div>
+                          ) : (
+                            <div className="space-y-1">
+                              {diffResult.changes.slice(0, 5).map((change) => (
+                                <div
+                                  key={`${change.type}-${change.shapeId}`}
+                                  className="text-[11px] text-slate-600"
+                                >
+                                  [{change.type}] {change.shapeId} · {change.summary}
+                                </div>
+                              ))}
+                              {diffResult.changes.length > 5 ? (
+                                <div className="text-[11px] text-slate-400">
+                                  其余 {diffResult.changes.length - 5} 项变更请后续扩展详情视图
+                                </div>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })

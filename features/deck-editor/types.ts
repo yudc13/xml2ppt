@@ -52,3 +52,27 @@ export type CommentEntity = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type SlideDiffChangeType = "added" | "removed" | "moved_resized" | "text_changed";
+
+export type SlideDiffChange = {
+  type: SlideDiffChangeType;
+  shapeId: string;
+  shapeType: string;
+  summary: string;
+};
+
+export type SlideDiffSummary = {
+  totalChanges: number;
+  added: number;
+  removed: number;
+  movedResized: number;
+  textChanged: number;
+};
+
+export type SlideDiffResult = {
+  fromVersion: number;
+  toVersion: number;
+  summary: SlideDiffSummary;
+  changes: SlideDiffChange[];
+};
