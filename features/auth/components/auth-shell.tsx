@@ -26,8 +26,8 @@ export function AuthShell({ title, subtitle, children }: AuthShellProps) {
             <p className="mt-4 max-w-sm text-sm text-slate-200">{subtitle}</p>
           </div>
           <div className="rounded-2xl border border-white/20 bg-white/8 p-4">
-            <p className="text-xs text-slate-200">Google / GitHub OAuth enabled</p>
-            <p className="mt-1 text-sm text-white">Secure login powered by Clerk</p>
+            <p className="text-xs text-slate-200">已启用 Google / GitHub OAuth 登录</p>
+            <p className="mt-1 text-sm text-white">由 Clerk 提供安全登录支持</p>
           </div>
           <div className="pointer-events-none absolute top-8 right-8 h-24 w-24 rounded-full border border-white/20" />
           <div className="pointer-events-none absolute right-24 bottom-28 h-14 w-14 rounded-xl border border-white/15" />
