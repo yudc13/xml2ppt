@@ -18,7 +18,7 @@ export function AuthShell({ title, subtitle, children }: AuthShellProps) {
         <aside className="relative hidden bg-[linear-gradient(135deg,#0f172a_0%,#1e293b_48%,#155e75_100%)] p-10 text-white md:flex md:flex-col md:justify-between">
           <div>
             <p className="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs tracking-[0.18em] uppercase">
-              PPT Workspace
+              PPT WORKSPACE
             </p>
             <h1 className="mt-6 text-4xl leading-tight font-semibold tracking-tight">
               {title}
